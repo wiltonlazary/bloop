@@ -158,12 +158,8 @@ lazy val jsonConfig213 = project
       Keys.baseDirectory.value./("src")./("main")./("scala-2.11-12"),
     target := (file("config") / "target" / "json-config-2.13").getAbsoluteFile,
     scalaVersion := "2.13.1",
-    scalacOptions in Compile in compile := {
-      (scalacOptions in Compile in compile).value
-        .filterNot(opt => opt == "-deprecation" || opt == "-Yno-adapted-args"),
-    },
-    scalacOptions in Test in compile := {
-      (scalacOptions in Test in compile).value
+    scalacOptions in compile := {
+      (scalacOptions in compile).value
         .filterNot(opt => opt == "-deprecation" || opt == "-Yno-adapted-args"),
     },
     libraryDependencies ++= {
@@ -368,8 +364,7 @@ lazy val launcher: Project = project
     parallelExecution in Test := false,
     libraryDependencies ++= List(
       Dependencies.coursier,
-      Dependencies.coursierCache,
-      Dependencies.nuprocess
+      Dependencies.coursierCache
     )
   )
 
@@ -465,7 +460,17 @@ def shadeSbtSettingsForModule(moduleId: String, module: Reference, dependencyToS
       "cats",
       "jawn",
       "org.typelevel.jawn",
-      "io.circe"
+      "io.circe",
+      "snailgun",
+      "org.zeroturnaround",
+      "io.github.soc",
+      "org.slf4j",
+      "scopt",
+      "macrocompat",
+      "com.zaxxer.nuprocess",
+      "coursier",
+      "shapeless",
+      "argonaut"
     ),
     toShadeClasses := {
       // Only shade dependencies, not bloop config code
@@ -497,7 +502,7 @@ def defineShadedSbtPlugin(
 }
 
 lazy val sbtBloop10: Project = project
-  .dependsOn(jsonConfig212)
+  .dependsOn(jsonConfig212, launcher)
   .enablePlugins(ScriptedPlugin)
   .in(integrations / "sbt-bloop")
   .settings(BuildDefaults.scriptedSettings)

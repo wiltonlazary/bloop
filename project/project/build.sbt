@@ -14,7 +14,14 @@ val sbtBloopBuildShadedDeps = project
       (scalacOptions in Compile).value.filterNot(_ == "-deprecation"),
     libraryDependencies ++= List(
       "io.circe" %% "circe-parser" % "0.12.2",
-      "io.circe" %% "circe-derivation" % "0.12.0-M7"
+      "io.circe" %% "circe-derivation" % "0.12.0-M7",
+      "org.zeroturnaround" % "zt-exec" % "1.11",
+      "org.slf4j" % "slf4j-nop" % "1.7.2",
+      "me.vican.jorge" %% "snailgun-cli" % "0.3.1",
+      "io.get-coursier" %% "coursier" % "1.1.0-M14-4",
+      "io.get-coursier" %% "coursier-cache" % "1.1.0-M14-4",
+      "net.java.dev.jna" % "jna" % "4.5.0",
+      "net.java.dev.jna" % "jna-platform" % "4.5.0"
     )
   )
 
@@ -40,6 +47,8 @@ val sbtBloopBuildShaded = project
                 ppath.contains("scala-reflect") ||
                 ppath.contains("scala-xml") ||
                 ppath.contains("macro-compat") ||
+                ppath.contains("jna-platform") ||
+                ppath.contains("jna") ||
                 ppath.contains("scalamacros")
             ) && path.exists
           }
@@ -52,7 +61,17 @@ val sbtBloopBuildShaded = project
       "cats",
       "jawn",
       "org.typelevel.jawn",
-      "io.circe"
+      "io.circe",
+      "snailgun",
+      "org.zeroturnaround",
+      "io.github.soc",
+      "org.slf4j",
+      "scopt",
+      "macrocompat",
+      "com.zaxxer.nuprocess",
+      "coursier",
+      "shapeless",
+      "argonaut"
     ),
     // Let's add our sbt plugin sources to the module
     unmanagedSourceDirectories in Compile ++= {
@@ -61,6 +80,9 @@ val sbtBloopBuildShaded = project
       List(
         baseDir / "config" / "src" / "main" / "scala",
         baseDir / "config" / "src" / "main" / "scala-2.11-12",
+        baseDir / "sockets" / "src" / "main" / "java",
+        baseDir / "bloopgun" / "src" / "main" / "scala",
+        baseDir / "launcher" / "src" / "main" / "scala",
         pluginMainDir / "scala",
         pluginMainDir / s"scala-sbt-${Keys.sbtBinaryVersion.value}"
       )
