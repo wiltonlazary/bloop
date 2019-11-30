@@ -182,6 +182,23 @@ lazy val sockets: Project = project
     sources in (Compile, doc) := Nil
   )
 
+lazy val runner = project
+  .settings(
+    name := "bloop-runner",
+    scalaVersion := Scala212Version,
+    fork in run := true,
+    fork in Test := true,
+    fork in run in IntegrationTest := true,
+    parallelExecution in test := false,
+    libraryDependencies ++= {
+      List(
+        Dependencies.scopt,
+        Dependencies.nailgun,
+        Dependencies.xxHashLibrary
+      )
+    }
+  )
+
 import build.BuildImplementation.jvmOptions
 // For the moment, the dependency is fixed
 lazy val frontend: Project = project

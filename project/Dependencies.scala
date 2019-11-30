@@ -54,6 +54,7 @@ object Dependencies {
   val asmVersion = "7.0"
   val snailgunVersion = "0.3.1"
   val ztExecVersion = "1.11"
+  val scoptVersion = "4.0.0-RC2"
 
   import sbt.librarymanagement.syntax.stringToOrganization
   val zinc = "ch.epfl.scala" %% "zinc" % zincVersion
@@ -126,6 +127,7 @@ object Dependencies {
   val mill = "com.lihaoyi" %% "mill-scalalib" % millVersion % Provided
   val xxHashLibrary = "net.jpountz.lz4" % "lz4" % xxHashVersion
   val zt = "org.zeroturnaround" % "zt-zip" % ztVersion
+  val scopt = "com.github.scopt" %% "scopt" % scoptVersion
 
   val brave = "io.zipkin.brave" % "brave" % braveVersion
   val zipkinSender = "io.zipkin.reporter2" % "zipkin-sender-urlconnection" % zipkinSenderVersion
