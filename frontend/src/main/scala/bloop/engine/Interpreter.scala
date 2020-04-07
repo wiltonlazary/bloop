@@ -5,6 +5,7 @@ import bloop.bsp.BspServer
 import bloop.cli._
 import bloop.cli.CliParsers.CommandsMessages
 import bloop.cli.completion.{Case, Mode}
+import bloop.config.Tag
 import bloop.io.{AbsolutePath, RelativePath, SourceWatcher}
 import bloop.logging.{DebugFilter, Logger, NoopLogger}
 import bloop.testing.{LoggingEventHandler, TestInternals}
@@ -244,7 +245,7 @@ object Interpreter {
             .mergeStatus(ExitStatus.InvalidCommandLineOption)
         )
       case project :: Nil =>
-        state.build.getProjectFor(project) match {
+        state.build.getTaggedProject(project, Tag.Runtime :: Nil) match {
           case Some(project) =>
             compileAnd(
               cmd,
@@ -333,7 +334,8 @@ object Interpreter {
 
   private def test(cmd: Commands.Test, state: State): Task[State] = {
     import state.logger
-    val lookup = lookupProjects(cmd.projects, state, Tasks.pickTestProject(_, state))
+    // Lookup the test project here -- we'll use the runtime project only later when running.
+    val lookup = lookupProjects(cmd.projects, state, state.build.getTaggedProject(_, Tag.Test :: Nil))
     if (lookup.missing.nonEmpty) Task.now(reportMissing(lookup.missing, state))
     else {
       // Projects to test != projects that need compiling
@@ -470,7 +472,7 @@ object Interpreter {
         val printTestTask = for {
           projectName <- cmd.project
           stateWithNoopLogger = state.copy(logger = NoopLogger)
-          project <- Tasks.pickTestProject(projectName, stateWithNoopLogger)
+          project <- stateWithNoopLogger.build.getTaggedProject(projectName, Tag.Test :: Tag.Runtime :: Nil)
         } yield {
           TestTask.findFullyQualifiedTestNames(project, stateWithNoopLogger).map { testsFqcn =>
             for {
@@ -594,7 +596,7 @@ object Interpreter {
       }
     }
 
-    val lookup = lookupProjects(cmd.projects, state, state.build.getProjectFor(_))
+    val lookup = lookupProjects(cmd.projects, state, state.build.getTaggedProject(_, Tag.Runtime :: Nil))
     if (lookup.missing.nonEmpty) Task.now(reportMissing(lookup.missing, state))
     else {
       val projects = lookup.found

@@ -10,4 +10,7 @@ object Tag {
 
   /** A tag marking test targets. */
   final val Test = "test"
+
+  /** A tag marking targets that represent a runtime configuration. */
+  final val Runtime = "runtime"
 }

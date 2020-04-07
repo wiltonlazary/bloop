@@ -20,8 +20,8 @@ val benchmarkBridge = project
   .settings(
     releaseEarly := { () },
     skip in publish := true,
-    bloopGenerate in Compile := None,
-    bloopGenerate in Test := None
+    bloopGenerate in Compile := Nil,
+    bloopGenerate in Test := Nil
   )
 
 lazy val bloopShared = (project in file("shared"))
@@ -367,8 +367,8 @@ lazy val bloopgunShaded = project
     name := "bloopgun",
     fork in run := true,
     fork in Test := true,
-    bloopGenerate in Compile := None,
-    bloopGenerate in Test := None,
+    bloopGenerate in Compile := Nil,
+    bloopGenerate in Test := Nil,
     libraryDependencies += Dependencies.scalaXml
   )
 
@@ -397,8 +397,8 @@ lazy val launcherShaded = project
     name := "bloop-launcher",
     fork in run := true,
     fork in Test := true,
-    bloopGenerate in Compile := None,
-    bloopGenerate in Test := None,
+    bloopGenerate in Compile := Nil,
+    bloopGenerate in Test := Nil,
     libraryDependencies ++= List(
       "net.java.dev.jna" % "jna" % "4.5.0",
       "net.java.dev.jna" % "jna-platform" % "4.5.0",
@@ -530,8 +530,8 @@ def defineShadedSbtPlugin(
     .settings(
       fork in run := true,
       fork in Test := true,
-      bloopGenerate in Compile := None,
-      bloopGenerate in Test := None,
+      bloopGenerate in Compile := Nil,
+      bloopGenerate in Test := Nil,
       target := (file("integrations") / "sbt-bloop-shaded" / "target" / sbtVersion).getAbsoluteFile
     )
 }
@@ -591,7 +591,7 @@ lazy val gradleBloop211 = project
   .settings(
     sourceDirectories in Test := Nil,
     publishLocal := publishLocal.dependsOn(publishLocal.in(jsonConfig211)).value,
-    bloopGenerate in Test := None,
+    bloopGenerate in Test := Nil,
     test in Test := Def.task {
       Keys.streams.value.log.error("Run 'gradleBloopTests/test' instead to test the gradle plugin.")
     }

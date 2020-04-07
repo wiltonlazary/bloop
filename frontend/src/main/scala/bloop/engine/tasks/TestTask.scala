@@ -75,18 +75,19 @@ object TestTask {
         }
       }
     } else {
-      TestTask.discoverTestFrameworks(project, state, mode).flatMap {
+      val runtimeProject = state.build.getTaggedProject(project.name, Tag.Runtime :: Nil).getOrElse(project)
+      TestTask.discoverTestFrameworks(runtimeProject, state, mode).flatMap {
         case None => handleEmptyTestFrameworks
         case Some(found) if found.frameworks.isEmpty => handleEmptyTestFrameworks
         case Some(found) =>
           val configuredFrameworks = found.frameworks
           logger.debug(s"Found test frameworks: ${configuredFrameworks.map(_.name).mkString(", ")}")
           val suites =
-            discoverTestSuites(state, project, configuredFrameworks, compileAnalysis, testFilter)
+            discoverTestSuites(state, runtimeProject, configuredFrameworks, compileAnalysis, testFilter)
           val discoveredFrameworks = suites.iterator.filterNot(_._2.isEmpty).map(_._1).toList
           val (userJvmOptions, userTestOptions) = rawTestOptions.partition(_.startsWith("-J"))
           val frameworkArgs = considerFrameworkArgs(discoveredFrameworks, userTestOptions, logger)
-          val args = project.testOptions.arguments ++ frameworkArgs
+          val args = runtimeProject.testOptions.arguments ++ frameworkArgs
           logger.debug(s"Running test suites with arguments: $args")
 
           found match {

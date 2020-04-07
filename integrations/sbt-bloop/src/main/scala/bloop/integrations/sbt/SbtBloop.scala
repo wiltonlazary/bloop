@@ -71,8 +71,8 @@ object BloopKeys {
     taskKey[Seq[(File, File)]]("Directory where to write the class files")
   val bloopInstall: TaskKey[Unit] =
     taskKey[Unit]("Generate all bloop configuration files")
-  val bloopGenerate: TaskKey[Option[File]] =
-    taskKey[Option[File]]("Generate bloop configuration file for this project")
+  val bloopGenerate: TaskKey[List[File]] =
+    taskKey[List[File]]("Generate bloop configuration file for this project")
   val bloopPostGenerate: TaskKey[Unit] =
     taskKey[Unit]("Force resource generators for Bloop.")
 
@@ -857,7 +857,7 @@ object BloopDefaults {
   private[bloop] val targetNamesToConfigs =
     new ConcurrentHashMap[String, GeneratedProject]()
 
-  def bloopGenerate: Def.Initialize[Task[Option[File]]] = Def.taskDyn {
+  def bloopGenerate: Def.Initialize[Task[List[File]]] = Def.taskDyn {
     val logger = Keys.streams.value.log
     val project = Keys.thisProject.value
     val scoped = Keys.resolvedScoped.value
@@ -873,13 +873,13 @@ object BloopDefaults {
     }
 
     lazy val generated = Option(targetNamesToConfigs.get(projectName))
-    if (isMetaBuild && configuration == Test) inlinedTask[Option[File]](None)
-    else if (!hasConfigSettings) inlinedTask[Option[File]](None)
+    if (isMetaBuild && configuration == Test) inlinedTask[List[File]](Nil)
+    else if (!hasConfigSettings) inlinedTask[List[File]](Nil)
     else if (generated.isDefined && generated.get.fromSbtUniverseId == currentSbtUniverse) {
       Def.task {
         // Force classpath to force side-effects downstream to fully simulate `bloopGenerate`
         val _ = emulateDependencyClasspath.value.map(_.toPath.toAbsolutePath).toList
-        generated.map(_.outPath.toFile)
+        generated.map(_.outPath.toFile).toList
       }
     } else {
       Def
@@ -893,11 +893,21 @@ object BloopDefaults {
           val outFile = bloopConfigDir / s"$projectName.json"
           val outFilePath = outFile.toPath
 
+          val outRuntimeFile = bloopConfigDir / s"$projectName-runtime.json"
+          val outRuntimeFilePath = outRuntimeFile.toPath
+
           // Important that it's lazy, we want to avoid the price of reading config file if possible
           lazy val previousConfigFile = {
             if (!Files.exists(outFilePath)) None
             else {
               safeParseConfig(outFilePath, logger).map(_.project)
+            }
+          }
+
+          lazy val previousRuntimeConfigFile = {
+            if (!Files.exists(outRuntimeFilePath)) None
+            else {
+              safeParseConfig(outRuntimeFilePath, logger).map(_.project)
             }
           }
 
@@ -1026,9 +1036,25 @@ object BloopDefaults {
               Some(tags))
             Config.File(Config.File.LatestVersion, project)
           }
+
+          val runtimeConfig = {
+            val c = Keys.classpathOptions.value
+            val java = Config.Java(javacOptions)
+            val analysisOut = BloopKeys.bloopAnalysisOut.value.map(_.toPath)
+            val compileSetup = Config.CompileSetup(compileOrder, c.bootLibrary, c.compiler, c.extra, c.autoBoot, c.filterLibrary)
+            val `scala` = Config.Scala(scalaOrg, scalaName, scalaVersion, scalacOptions, allScalaJars, analysisOut, Some(compileSetup))
+            val resources = Some(bloopResourcesTask.value)
+
+            val sbt = None // Written by `postGenerate` instead
+            val project = Config.Project(projectName + "-runtime", baseDirectory, Option(buildBaseDirectory.toPath), Nil, None, None, projectName :: Nil,
+              classpath, out, classesDir, resources, Some(`scala`), Some(java), sbt, Some(testOptions), Some(platform), resolution,
+              Some(tags :+ Tag.Runtime))
+            Config.File(Config.File.LatestVersion, project)
+          }
           // format: ON
 
-          writeConfigAtomically(config, outFile.toPath)
+          writeConfigAtomically(config, outFilePath)
+          writeConfigAtomically(runtimeConfig, outRuntimeFilePath)
 
           // Only shorten path for configuration files written to the the root build
           val allInRoot = BloopKeys.bloopAggregateSourceDependencies.in(Global).value
@@ -1037,13 +1063,18 @@ object BloopDefaults {
               outFile.relativeTo(rootBaseDirectory).getOrElse(outFile)
             else outFile
           }
+          val userFriendlyRuntimeConfigPath = {
+            if (allInRoot || buildBaseDirectory == rootBaseDirectory)
+              outRuntimeFile.relativeTo(rootBaseDirectory).getOrElse(outRuntimeFile)
+            else outRuntimeFile
+          }
 
           targetNamesToConfigs
             .put(projectName, GeneratedProject(outFile.toPath, config.project, currentSbtUniverse))
 
-          logger.debug(s"Bloop wrote the configuration of project '$projectName' to '$outFile'")
-          logger.success(s"Generated $userFriendlyConfigPath")
-          Some(outFile)
+          logger.debug(s"Bloop wrote the configuration of project '$projectName' to '$outFile' and '$outRuntimeFile'")
+          logger.success(s"Generated $userFriendlyConfigPath and $userFriendlyRuntimeConfigPath")
+          List(outFile, outRuntimeFile)
         }
     }
   }
@@ -1069,7 +1100,7 @@ object BloopDefaults {
   private final val allJson = sbt.GlobFilter("*.json")
   private final val removeStaleProjects = {
     allConfigDirs: Set[File] =>
-      { (state: State, generatedFiles: Set[Option[File]]) =>
+      { (state: State, generatedFiles: Set[List[File]]) =>
         val logger = state.globalLogging.full
         val allConfigs =
           allConfigDirs.flatMap(configDir => sbt.PathFinder(configDir).*(allJson).get)
@@ -1111,7 +1142,7 @@ object BloopDefaults {
       .all(filter)
       .map(_.toSet)
       // Smart trick to modify state once a task has completed (who said tasks cannot alter state?)
-      .apply((t: Task[Set[Option[File]]]) => sbt.SessionVar.transform(t, removeProjects))
+      .apply((t: Task[Set[List[File]]]) => sbt.SessionVar.transform(t, removeProjects))
       .map(_ => ())
   }
 

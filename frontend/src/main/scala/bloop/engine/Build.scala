@@ -29,6 +29,11 @@ final case class Build private (
   def hasMissingDependencies(project: Project): Option[List[String]] =
     missingDeps.get(project)
 
+  def getTaggedProject(name: String, tags: List[String]): Option[Project] = {
+    if (tags.isEmpty) getProjectFor(name)
+    else getProjectFor(tags.mkString(name + "-", "-", "")).orElse(getTaggedProject(name, tags.init))
+  }
+
   /**
    * Detect changes in the build definition since the last time it was loaded
    * and tell the compiler which action should be applied to update the build.

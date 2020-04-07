@@ -109,7 +109,7 @@ object Offloader {
     // Make sure reporter is resetted before it's used for compilation
     reporter.reset()
     val buildTargetId = BloopCompileKeys.bloopBuildTargetId.value
-    BloopCompileInputs(buildTargetId, config, reporter, logger)
+    BloopCompileInputs(buildTargetId, config.headOption, reporter, logger)
   }
 
   case class BloopCompileState(

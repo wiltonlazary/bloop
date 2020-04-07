@@ -8,8 +8,8 @@ lazy val `bloop-test-plugin` = project
   .settings(
     libraryDependencies += "org.scala-lang" % "scala-compiler" % scalaVersion.value,
     publishArtifact in Compile := false,
-    bloopGenerate in Compile := None,
-    bloopGenerate in Test := None
+    bloopGenerate in Compile := Nil,
+    bloopGenerate in Test := Nil
   )
 
 val silencerVersion = "1.3.1"
