@@ -23,7 +23,6 @@ import bloop.bsp.ScalaTestSuites
 import bloop.cli.ExitStatus
 import bloop.data.Platform
 import bloop.data.Project
-import bloop.engine.ExecutionContext
 import bloop.engine.State
 import bloop.engine.tasks.RunMode
 import bloop.engine.tasks.Tasks
@@ -33,49 +32,47 @@ import bloop.io.Environment.lineSeparator
 import bloop.logging.Logger
 import bloop.logging.LoggerAction
 import bloop.logging.LoggerAction.LogInfoMessage
+import bloop.logging.NoopLogger
 import bloop.logging.ObservedLogger
 import bloop.logging.RecordingLogger
 import bloop.reporter.ReporterAction
+import bloop.task.Task
 import bloop.util.TestProject
 import bloop.util.TestUtil
 
 import com.microsoft.java.debug.core.protocol.Requests.SetBreakpointArguments
 import com.microsoft.java.debug.core.protocol.Types
 import com.microsoft.java.debug.core.protocol.Types.SourceBreakpoint
-import monix.eval.Task
 import monix.execution.Ack
 import monix.reactive.Observer
 
 object DebugServerSpec extends DebugBspBaseSuite {
   private val ServerNotListening = new IllegalStateException("Server is not accepting connections")
   private val Success: ExitStatus = ExitStatus.Ok
+  private val resolver = new BloopDebugToolsResolver(NoopLogger)
 
-  test("cancelling server closes server connection") {
+  testTask("cancelling server closes server connection", FiniteDuration(10, SECONDS)) {
     startDebugServer(Task.now(Success)) { server =>
-      val test = for {
+      for {
         _ <- Task(server.cancel())
         serverClosed <- waitForServerEnd(server)
       } yield {
         assert(serverClosed)
       }
-
-      TestUtil.await(FiniteDuration(10, SECONDS), ExecutionContext.ioScheduler)(test)
     }
   }
 
-  test("cancelling server closes client connection") {
+  testTask("cancelling server closes client connection", FiniteDuration(10, SECONDS)) {
     startDebugServer(Task.now(Success)) { server =>
-      val test = for {
+      for {
         client <- server.startConnection
         _ <- Task(server.cancel())
         _ <- Task.fromFuture(client.closedPromise.future)
       } yield ()
-
-      TestUtil.await(FiniteDuration(10, SECONDS), ExecutionContext.ioScheduler)(test)
     }
   }
 
-  test("sends exit and terminated events when cancelled") {
+  testTask("sends exit and terminated events when cancelled", FiniteDuration(30, SECONDS)) {
     TestUtil.withinWorkspace { workspace =>
       val main =
         """|/Main.scala
@@ -89,11 +86,11 @@ object DebugServerSpec extends DebugBspBaseSuite {
       val logger = new RecordingLogger(ansiCodesSupported = false)
       val project = TestProject(workspace, "p", List(main))
 
-      loadBspState(workspace, List(project), logger) { state =>
+      loadBspStateWithTask(workspace, List(project), logger) { state =>
         val runner = mainRunner(project, state)
 
         startDebugServer(runner) { server =>
-          val test = for {
+          for {
             client <- server.startConnection
             _ <- client.initialize()
             _ <- client.launch()
@@ -103,14 +100,15 @@ object DebugServerSpec extends DebugBspBaseSuite {
             _ <- client.terminated
             _ <- Task.fromFuture(client.closedPromise.future)
           } yield ()
-
-          TestUtil.await(FiniteDuration(30, SECONDS), ExecutionContext.ioScheduler)(test)
         }
       }
     }
   }
 
-  test("closes the client when debuggee finished and terminal events are sent") {
+  testTask(
+    "closes the client when debuggee finished and terminal events are sent",
+    FiniteDuration(60, SECONDS)
+  ) {
     TestUtil.withinWorkspace { workspace =>
       val main =
         """|/main/scala/Main.scala
@@ -124,11 +122,11 @@ object DebugServerSpec extends DebugBspBaseSuite {
       val logger = new RecordingLogger(ansiCodesSupported = false)
       val project = TestProject(workspace, "r", List(main))
 
-      loadBspState(workspace, List(project), logger) { state =>
+      loadBspStateWithTask(workspace, List(project), logger) { state =>
         val runner = mainRunner(project, state)
 
         startDebugServer(runner) { server =>
-          val test = for {
+          for {
             client <- server.startConnection
             _ <- client.initialize()
             _ <- client.launch()
@@ -147,14 +145,15 @@ object DebugServerSpec extends DebugBspBaseSuite {
               "Hello, World!"
             )
           }
-
-          TestUtil.await(FiniteDuration(60, SECONDS), ExecutionContext.ioScheduler)(test)
         }
       }
     }
   }
 
-  test("accepts arguments and jvm options and environment variables") {
+  testTask(
+    "accepts arguments and jvm options and environment variables",
+    FiniteDuration(60, SECONDS)
+  ) {
     TestUtil.withinWorkspace { workspace =>
       val main =
         """|/main/scala/Main.scala
@@ -170,7 +169,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
       val logger = new RecordingLogger(ansiCodesSupported = false)
       val project = TestProject(workspace, "r", List(main))
 
-      loadBspState(workspace, List(project), logger) { state =>
+      loadBspStateWithTask(workspace, List(project), logger) { state =>
         val runner = mainRunner(
           project,
           state,
@@ -180,7 +179,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
         )
 
         startDebugServer(runner) { server =>
-          val test = for {
+          for {
             client <- server.startConnection
             _ <- client.initialize()
             _ <- client.launch()
@@ -199,14 +198,12 @@ object DebugServerSpec extends DebugBspBaseSuite {
               "hello\nworld!"
             )
           }
-
-          TestUtil.await(FiniteDuration(60, SECONDS), ExecutionContext.ioScheduler)(test)
         }
       }
     }
   }
 
-  test("supports scala and java breakpoints") {
+  testTask("supports scala and java breakpoints", FiniteDuration(60, SECONDS)) {
     TestUtil.withinWorkspace { workspace =>
       object Sources {
         val javaClass: String =
@@ -252,7 +249,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
       val logger = new RecordingLogger(ansiCodesSupported = false)
       val project = TestProject(workspace, "r", List(Sources.scalaMain, Sources.javaClass))
 
-      loadBspState(workspace, List(project), logger) { state =>
+      loadBspStateWithTask(workspace, List(project), logger) { state =>
         val runner = mainRunner(project, state)
 
         val buildProject = state.toTestState.getProjectFor(project)
@@ -264,7 +261,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
         val javaBreakpoints = breakpointsArgs(`HelloJava.java`, 3, 7)
 
         startDebugServer(runner) { server =>
-          val test = for {
+          for {
             client <- server.startConnection
             _ <- client.initialize()
             _ <- client.launch()
@@ -306,14 +303,15 @@ object DebugServerSpec extends DebugBspBaseSuite {
                  |""".stripMargin
             )
           }
-
-          TestUtil.await(FiniteDuration(60, SECONDS), ExecutionContext.ioScheduler)(test)
         }
       }
     }
   }
 
-  test("requesting stack traces and variables after breakpoints works") {
+  testTask(
+    "requesting stack traces and variables after breakpoints works",
+    FiniteDuration(60, SECONDS)
+  ) {
     TestUtil.withinWorkspace { workspace =>
       val source = """|/Main.scala
                       |object Main {
@@ -331,7 +329,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
       val logger = new RecordingLogger(ansiCodesSupported = false)
       val project = TestProject(workspace, "r", List(source))
 
-      loadBspState(workspace, List(project), logger) { state =>
+      loadBspStateWithTask(workspace, List(project), logger) { state =>
         val runner = mainRunner(project, state)
 
         val buildProject = state.toTestState.getProjectFor(project)
@@ -341,7 +339,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
         val breakpoints = breakpointsArgs(`Main.scala`, 4)
 
         startDebugServer(runner) { server =>
-          val test = for {
+          for {
             client <- server.startConnection
             _ <- client.initialize()
             _ <- client.launch()
@@ -377,24 +375,25 @@ object DebugServerSpec extends DebugBspBaseSuite {
                  |""".stripMargin
             )
           }
-
-          TestUtil.await(FiniteDuration(60, SECONDS), ExecutionContext.ioScheduler)(test)
         }
       }
     }
   }
 
-  test("sends exit and terminated events when cannot run debuggee") {
+  testTask(
+    "sends exit and terminated events when cannot run debuggee",
+    FiniteDuration(60, SECONDS)
+  ) {
     TestUtil.withinWorkspace { workspace =>
       // note that there is nothing that can be run (no sources)
       val project = TestProject(workspace, "p", Nil)
 
       val logger = new RecordingLogger(ansiCodesSupported = false)
-      loadBspState(workspace, List(project), logger) { state =>
+      loadBspStateWithTask(workspace, List(project), logger) { state =>
         val runner = mainRunner(project, state)
 
         startDebugServer(runner) { server =>
-          val test = for {
+          for {
             client <- server.startConnection
             _ <- client.initialize()
             _ <- client.launch()
@@ -403,16 +402,17 @@ object DebugServerSpec extends DebugBspBaseSuite {
             _ <- client.exited
             _ <- client.terminated
           } yield ()
-
-          TestUtil.await(FiniteDuration(60, SECONDS), ExecutionContext.ioScheduler)(test)
         }
       }
     }
   }
 
-  test("does not accept a connection unless the previous session requests a restart") {
+  testTask(
+    "does not accept a connection unless the previous session requests a restart",
+    FiniteDuration(5, SECONDS)
+  ) {
     startDebugServer(Task.now(Success)) { server =>
-      val test = for {
+      for {
         firstClient <- server.startConnection
         secondClient <- server.startConnection
         requestBeforeRestart <- secondClient.initialize().timeout(FiniteDuration(1, SECONDS)).failed
@@ -421,30 +421,26 @@ object DebugServerSpec extends DebugBspBaseSuite {
       } yield {
         assert(requestBeforeRestart.isInstanceOf[TimeoutException])
       }
-
-      TestUtil.await(FiniteDuration(5, SECONDS), ExecutionContext.ioScheduler)(test)
     }
   }
 
-  test("responds to launch when jvm could not be started") {
+  testTask("responds to launch when jvm could not be started", FiniteDuration(20, SECONDS)) {
     // note that the runner is not starting the jvm
     // therefore the debuggee address will never be bound
     val runner = Task.now(Success)
 
     startDebugServer(runner) { server =>
-      val test = for {
+      for {
         client <- server.startConnection
         _ <- client.initialize()
         cause <- client.launch().failed
       } yield {
         assertContains(cause.getMessage, "Operation timed out")
       }
-
-      TestUtil.await(FiniteDuration(20, SECONDS), ExecutionContext.ioScheduler)(test)
     }
   }
 
-  test("restarting closes current client and debuggee") {
+  testTask("restarting closes current client and debuggee", FiniteDuration(15, SECONDS)) {
     val cancelled = Promise[Boolean]()
     val awaitCancellation = Task
       .fromFuture(cancelled.future)
@@ -453,7 +449,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
       .doOnCancel(complete(cancelled, true))
 
     startDebugServer(awaitCancellation) { server =>
-      val test = for {
+      for {
         firstClient <- server.startConnection
         _ <- firstClient.disconnect(restart = true)
         secondClient <- server.startConnection
@@ -467,12 +463,10 @@ object DebugServerSpec extends DebugBspBaseSuite {
         // Second client should still be connected despite the first one was closed
         assert(debuggeeCanceled, !secondClientClosed)
       }
-
-      TestUtil.await(FiniteDuration(15, SECONDS), ExecutionContext.ioScheduler)(test)
     }
   }
 
-  test("disconnecting closes server, client and debuggee") {
+  testTask("disconnecting closes server, client and debuggee", FiniteDuration(20, SECONDS)) {
     val cancelled = Promise[Boolean]()
     val awaitCancellation = Task
       .fromFuture(cancelled.future)
@@ -481,7 +475,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
       .doOnCancel(complete(cancelled, true))
 
     startDebugServer(awaitCancellation) { server =>
-      val test = for {
+      for {
         client <- server.startConnection
         _ <- client.disconnect(restart = false)
         debuggeeCanceled <- Task.fromFuture(cancelled.future)
@@ -490,42 +484,36 @@ object DebugServerSpec extends DebugBspBaseSuite {
       } yield {
         assert(debuggeeCanceled, serverClosed)
       }
-
-      TestUtil.await(FiniteDuration(20, SECONDS), ExecutionContext.ioScheduler)(test)
     }
   }
 
-  test("closes the client even though the debuggee cannot close") {
+  testTask("closes the client even though the debuggee cannot close", FiniteDuration(20, SECONDS)) {
     val blockedDebuggee = Promise[Nothing]
 
     startDebugServer(Task.fromFuture(blockedDebuggee.future)) { server =>
-      val test = for {
+      for {
         client <- server.startConnection
         _ <- Task(server.cancel())
         _ <- Task.fromFuture(client.closedPromise.future)
       } yield ()
-
-      TestUtil.await(FiniteDuration(20, SECONDS), ExecutionContext.ioScheduler)(test)
     }
   }
 
-  test("propagates launch failure cause") {
+  testTask("propagates launch failure cause", FiniteDuration(20, SECONDS)) {
     val task = Task.raiseError(new Exception(ExitStatus.RunError.name))
 
     startDebugServer(task) { server =>
-      val test = for {
+      for {
         client <- server.startConnection
         _ <- client.initialize()
         response <- client.launch().failed
       } yield {
         assert(response.getMessage.contains(ExitStatus.RunError.name))
       }
-
-      TestUtil.await(FiniteDuration(20, SECONDS), ExecutionContext.ioScheduler)(test)
     }
   }
 
-  test("attaches to a remote process and sets breakpoint") {
+  testTask("attaches to a remote process and sets breakpoint", FiniteDuration(120, SECONDS)) {
     TestUtil.withinWorkspace { workspace =>
       val main =
         """|/Main.scala
@@ -539,7 +527,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
       val logger = new RecordingLogger(ansiCodesSupported = false)
       val project = TestProject(workspace, "r", List(main))
 
-      loadBspState(workspace, List(project), logger) { state =>
+      loadBspStateWithTask(workspace, List(project), logger) { state =>
         val testState = state.compile(project).toTestState
         val buildProject = testState.getProjectFor(project)
         def srcFor(srcName: String) =
@@ -555,7 +543,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
           )
 
         startDebugServer(attachRemoteProcessRunner) { server =>
-          val test = for {
+          for {
             port <- startRemoteProcess(buildProject, testState)
             client <- server.startConnection
             _ <- client.initialize()
@@ -580,14 +568,12 @@ object DebugServerSpec extends DebugBspBaseSuite {
               ""
             )
           }
-
-          TestUtil.await(FiniteDuration(120, SECONDS), ExecutionContext.ioScheduler)(test)
         }
       }
     }
   }
 
-  test("evaluate expression in main debuggee") {
+  testTask("evaluate expression in main debuggee", FiniteDuration(60, SECONDS)) {
     TestUtil.withinWorkspace { workspace =>
       val source = """|/Main.scala
                       |object Main {
@@ -607,10 +593,10 @@ object DebugServerSpec extends DebugBspBaseSuite {
         workspace,
         "r",
         List(source),
-        scalaVersion = Some("2.12.15")
+        scalaVersion = Some("2.12.17")
       )
 
-      loadBspState(workspace, List(project), logger) { state =>
+      loadBspStateWithTask(workspace, List(project), logger) { state =>
         val runner = mainRunner(project, state)
 
         val buildProject = state.toTestState.getProjectFor(project)
@@ -620,7 +606,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
         val breakpoints = breakpointsArgs(`Main.scala`, 4)
 
         startDebugServer(runner) { server =>
-          val test = for {
+          for {
             client <- server.startConnection
             _ <- client.initialize()
             _ <- client.launch()
@@ -643,14 +629,53 @@ object DebugServerSpec extends DebugBspBaseSuite {
             assertNoDiff(evaluation.`type`, "String")
             assertNoDiff(evaluation.result, "\"foo\"")
           }
-
-          TestUtil.await(FiniteDuration(60, SECONDS), ExecutionContext.ioScheduler)(test)
         }
       }
     }
   }
 
-  test("evaluate expression in test suite") {
+  testTask("set-workspace-directory", FiniteDuration(60, SECONDS)) {
+    TestUtil.withinWorkspace { workspace =>
+      val source =
+        """|/Main.scala
+           |object Main {
+           |  def main(args: Array[String]): Unit = {
+           |    println(java.nio.file.Paths.get("").toAbsolutePath())
+           |  }
+           |}
+           |""".stripMargin
+
+      val logger = new RecordingLogger(ansiCodesSupported = false)
+      val project = TestProject(
+        workspace,
+        "r",
+        List(source)
+      )
+
+      loadBspStateWithTask(workspace, List(project), logger) { state =>
+        val runner = mainRunner(project, state)
+
+        startDebugServer(runner) { server =>
+          for {
+            client <- server.startConnection
+            _ <- client.initialize()
+            _ <- client.launch()
+            _ <- client.initialized
+            _ <- client.configurationDone()
+            _ <- client.exited
+            _ <- client.terminated
+            finalOutput <- client.takeCurrentOutput
+            _ <- Task.fromFuture(client.closedPromise.future)
+          } yield {
+            assert(client.socket.isClosed)
+            assertNoDiff(finalOutput, workspace.toString)
+          }
+        }
+      }
+    }
+  }
+
+  testTask("evaluate expression in test suite", FiniteDuration(60, SECONDS)) {
     TestUtil.withinWorkspace { workspace =>
       val source =
         """/MySuite.scala
@@ -668,7 +693,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
 
       val logger = new RecordingLogger(ansiCodesSupported = false)
 
-      val scalaVersion = "2.12.15"
+      val scalaVersion = "2.12.17"
       val compilerJars = ScalaInstance
         .resolve("org.scala-lang", "scala-compiler", scalaVersion, logger)
         .allJars
@@ -684,7 +709,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
         scalaVersion = Some(scalaVersion)
       )
 
-      loadBspState(workspace, List(project), logger) { state =>
+      loadBspStateWithTask(workspace, List(project), logger) { state =>
         val runner = testRunner(project, state)
 
         val buildProject = state.toTestState.getProjectFor(project)
@@ -694,7 +719,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
         val breakpoints = breakpointsArgs(`MySuite.scala`, 5)
 
         startDebugServer(runner) { server =>
-          val test = for {
+          for {
             client <- server.startConnection
             _ <- client.initialize()
             _ <- client.launch()
@@ -717,14 +742,12 @@ object DebugServerSpec extends DebugBspBaseSuite {
             assertNoDiff(evaluation.`type`, "String")
             assertNoDiff(evaluation.result, "\"foo\"")
           }
-
-          TestUtil.await(FiniteDuration(60, SECONDS), ExecutionContext.ioScheduler)(test)
         }
       }
     }
   }
 
-  test("evaluate expression in attached debuggee") {
+  testTask("evaluate expression in attached debuggee", FiniteDuration(120, SECONDS)) {
     TestUtil.withinWorkspace { workspace =>
       val source = """|/Main.scala
                       |object Main {
@@ -744,10 +767,10 @@ object DebugServerSpec extends DebugBspBaseSuite {
         workspace,
         "r",
         List(source),
-        scalaVersion = Some("2.12.15")
+        scalaVersion = Some("2.12.17")
       )
 
-      loadBspState(workspace, List(project), logger) { state =>
+      loadBspStateWithTask(workspace, List(project), logger) { state =>
         val testState = state.compile(project).toTestState
         val buildProject = testState.getProjectFor(project)
         def srcFor(srcName: String) =
@@ -763,7 +786,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
           )
 
         startDebugServer(attachRemoteProcessRunner) { server =>
-          val test = for {
+          for {
             port <- startRemoteProcess(buildProject, testState)
             client <- server.startConnection
             _ <- client.initialize()
@@ -786,14 +809,12 @@ object DebugServerSpec extends DebugBspBaseSuite {
             assertNoDiff(evaluation.`type`, "String")
             assertNoDiff(evaluation.result, "\"foo\"")
           }
-
-          TestUtil.await(FiniteDuration(120, SECONDS), ExecutionContext.ioScheduler)(test)
         }
       }
     }
   }
 
-  test("run only single test") {
+  testTask("run only single test", FiniteDuration(60, SECONDS)) {
     TestUtil.withinWorkspace { workspace =>
       val source =
         """/MySuite.scala
@@ -812,7 +833,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
 
       val logger = new RecordingLogger(ansiCodesSupported = false)
 
-      val scalaVersion = "2.12.15"
+      val scalaVersion = "2.12.17"
       val compilerJars = ScalaInstance
         .resolve("org.scala-lang", "scala-compiler", scalaVersion, logger)
         .allJars
@@ -828,7 +849,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
         scalaVersion = Some(scalaVersion)
       )
 
-      loadBspState(workspace, List(project), logger) { state =>
+      loadBspStateWithTask(workspace, List(project), logger) { state =>
         val testClasses =
           ScalaTestSuites(
             List(
@@ -843,7 +864,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
         val runner = testRunner(project, state, testClasses)
 
         startDebugServer(runner) { server =>
-          val test = for {
+          for {
             client <- server.startConnection
             _ <- client.initialize()
             _ <- client.launch()
@@ -860,8 +881,6 @@ object DebugServerSpec extends DebugBspBaseSuite {
             assert(logger.debugs.contains("Test MySuite.test1 started"))
             assert(logger.debugs.contains("Test MySuite.test2 ignored"))
           }
-
-          TestUtil.await(FiniteDuration(60, SECONDS), ExecutionContext.ioScheduler)(test)
         }
       }
     }
@@ -961,7 +980,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
       project: TestProject,
       state: ManagedBspTestState,
       testClasses: ScalaTestSuites = ScalaTestSuites(List("MySuite"))
-  ): DebuggeeRunner = {
+  ): Debuggee = {
     val testState = state.compile(project).toTestState
     BloopDebuggeeRunner.forTestSuite(
       Seq(testState.getProjectFor(project)),
@@ -980,7 +999,7 @@ object DebugServerSpec extends DebugBspBaseSuite {
       arguments: List[String] = Nil,
       jvmOptions: List[String] = Nil,
       environmentVariables: List[String] = Nil
-  ): DebuggeeRunner = {
+  ): Debuggee = {
     val testState = state.compile(project).toTestState
     BloopDebuggeeRunner.forMainClass(
       Seq(testState.getProjectFor(project)),
@@ -993,19 +1012,21 @@ object DebugServerSpec extends DebugBspBaseSuite {
     }
   }
 
-  def startDebugServer(task: Task[ExitStatus])(f: TestServer => Any): Unit = {
-    val runner = new DebuggeeRunner {
-      override def classPathEntries: Seq[ClassPathEntry] = Seq.empty
+  def startDebugServer(task: Task[ExitStatus])(f: TestServer => Task[Unit]): Task[Unit] = {
+    val debuggee = new Debuggee {
+      override def modules: Seq[Module] = Seq.empty
+      override def libraries: Seq[Library] = Seq.empty
+      override def unmanagedEntries: Seq[UnmanagedEntry] = Seq.empty
       override def javaRuntime: Option[JavaRuntime] = None
-      override def evaluationClassLoader: Option[ClassLoader] = None
       def name: String = "MockRunner"
       def run(listener: DebuggeeListener): CancelableFuture[Unit] = {
         DapCancellableFuture.runAsync(task.map(_ => ()), defaultScheduler)
       }
+      def scalaVersion: ScalaVersion = ScalaVersion("2.12.17")
     }
 
     startDebugServer(
-      runner,
+      debuggee,
       // the runner is a mock so no need to wait for the jvm to startup
       // make the test faster
       Duration.Zero
@@ -1013,26 +1034,22 @@ object DebugServerSpec extends DebugBspBaseSuite {
   }
 
   def startDebugServer(
-      runner: DebuggeeRunner,
+      debuggee: Debuggee,
       gracePeriod: Duration = Duration(5, SECONDS)
-  )(f: TestServer => Any): Unit = {
+  )(f: TestServer => Task[Unit]): Task[Unit] = {
     val logger = new RecordingLogger(ansiCodesSupported = false)
+    val dapLogger = new DebugServerLogger(logger)
+    val debugTools = DebugTools(debuggee, resolver, dapLogger)
 
-    val server = DebugServer(
-      runner,
-      new DebugServerLogger(logger),
-      autoCloseSession = true,
-      gracePeriod
-    )(defaultScheduler)
+    val config = DebugConfig.default.copy(gracePeriod = gracePeriod)
+    val server = DebugServer(debuggee, debugTools, dapLogger, config = config)(defaultScheduler)
     Task.fromFuture(server.start()).runAsync(defaultScheduler)
 
     val testServer = new TestServer(server)
-    val test = Task(f(testServer))
+    f(testServer)
       .doOnFinish(_ => Task(testServer.close()))
       .doOnCancel(Task(testServer.close()))
 
-    TestUtil.await(35, SECONDS)(test)
-    ()
   }
 
   private final class TestServer(val server: DebugServer) extends AutoCloseable {

@@ -14,13 +14,13 @@ import bloop.engine.State
 import bloop.logging.DebugFilter
 import bloop.logging.Logger
 import bloop.logging.Slf4jAdapter
+import bloop.task.Task
 import bloop.util.monix.FoldLeftAsyncConsumer
 
 import io.methvin.watcher.DirectoryChangeEvent
 import io.methvin.watcher.DirectoryChangeEvent.EventType
 import io.methvin.watcher.DirectoryChangeListener
 import io.methvin.watcher.DirectoryWatcher
-import monix.eval.Task
 import monix.execution.Cancelable
 import monix.execution.atomic.AtomicBoolean
 import monix.reactive.MulticastStrategy
@@ -53,6 +53,14 @@ final class SourceWatcher private (
       )
 
     var watchingEnabled: Boolean = true
+    val isSourceFile: Path => Boolean = {
+      val sourceGeneratorGlobs = for {
+        loadedProject <- state0.build.loadedProjects
+        sourceGenerator <- loadedProject.project.sourceGenerators
+        glob <- sourceGenerator.sourcesGlobs
+      } yield glob
+      path => SourceHasher.matchSourceFile(path) || sourceGeneratorGlobs.exists(_.matches(path))
+    }
     val listener = new DirectoryChangeListener {
       override def isWatching: Boolean = watchingEnabled
 
@@ -60,7 +68,7 @@ final class SourceWatcher private (
       override def onException(e: Exception): Unit = {
         slf4jLogger.debug(s"File watching threw an exception: ${e.getMessage}")
         // Enable tracing when https://github.com/scalacenter/bloop/issues/433 is done
-        //logger.trace(e)
+        // logger.trace(e)
       }
 
       private[this] val scheduledResubmissions = new ConcurrentHashMap[Path, Cancelable]()
@@ -68,7 +76,7 @@ final class SourceWatcher private (
         val targetFile = event.path()
         val attrs = Files.readAttributes(targetFile, classOf[BasicFileAttributes])
 
-        if (attrs.isRegularFile && SourceHasher.matchSourceFile(targetFile)) {
+        if (attrs.isRegularFile && isSourceFile(targetFile)) {
           if (attrs.size != 0L) {
             val resubmission = scheduledResubmissions.remove(targetFile)
             if (resubmission != null) resubmission.cancel()
@@ -185,15 +193,15 @@ final class SourceWatcher private (
       else FiniteDuration(userMs.toLong, "ms")
     }
 
-    observable
-      .transform(self => new BloopBufferTimedObservable(self, timespan, 0))
+    val consumeTask = new BloopBufferTimedObservable(observable, timespan, 0)
       .liftByOperator(
         new BloopWhileBusyDropEventsAndSignalOperator((es: Seq[Seq[DirectoryChangeEvent]]) =>
           es.flatten
         )
       )
       .consumeWith(fileEventConsumer)
-      .doOnCancel(Task(watchCancellation.cancel()))
+
+    Task.liftMonixTask(consumeTask, () => watchCancellation.cancel())
   }
 
   def notifyWatch(): Unit = {

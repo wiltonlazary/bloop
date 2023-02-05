@@ -17,13 +17,12 @@ import bloop.io.Environment.LineSplitter
 import bloop.io.Environment.lineSeparator
 import bloop.io.RelativePath
 import bloop.logging.RecordingLogger
+import bloop.task.Task
 import bloop.util.BuildUtil
 import bloop.util.CrossPlatform
 import bloop.util.SystemProperties
 import bloop.util.TestProject
 import bloop.util.TestUtil
-
-import monix.eval.Task
 
 object DeduplicationSpec extends bloop.bsp.BspBaseSuite {
   // Use only TCP to run deduplication
@@ -400,7 +399,7 @@ object DeduplicationSpec extends bloop.bsp.BspBaseSuite {
         assert(firstCompiledState.status == ExitStatus.Ok)
         assert(firstCliCompiledState.status == ExitStatus.Ok)
 
-        //assertValidCompilationState(firstCompiledState, projects)
+        // assertValidCompilationState(firstCompiledState, projects)
         assertValidCompilationState(firstCliCompiledState, projects)
         assertDifferentExternalClassesDirs(
           firstCliCompiledState,
@@ -513,7 +512,7 @@ object DeduplicationSpec extends bloop.bsp.BspBaseSuite {
         bspLogger,
         compileStartPromises = Some(compileStartPromises)
       ) { bspState =>
-        //val firstDelay = Some(random(400, 100))
+        // val firstDelay = Some(random(400, 100))
         val firstCompilation = bspState.compileHandle(`B`)
         val secondCompilation =
           waitUntilStartAndCompile(compiledState, `B`, startedFirstCompilation, cliLogger1)
@@ -568,7 +567,7 @@ object DeduplicationSpec extends bloop.bsp.BspBaseSuite {
             |  -> Msg: Compiling b (1 Scala source)
             |  -> Data kind: compile-task
             |#1: b/src/B.scala
-            |  -> List(Diagnostic(Range(Position(2,28),Position(2,28)),Some(Error),Some(_),Some(_),type mismatch;  found   : Int  required: String,None))
+            |  -> List(Diagnostic(Range(Position(2,28),Position(2,28)),Some(Error),Some(_),Some(_),type mismatch;  found   : Int  required: String,None,None,None))
             |  -> reset = true
             |#1: task finish 2
             |  -> errors 1, warnings 0
@@ -649,7 +648,7 @@ object DeduplicationSpec extends bloop.bsp.BspBaseSuite {
             |  -> Msg: Compiling b (1 Scala source)
             |  -> Data kind: compile-task
             |#2: b/src/B.scala
-            |  -> List(Diagnostic(Range(Position(2,28),Position(2,28)),Some(Error),Some(_),Some(_),type mismatch;  found   : Int  required: String,None))
+            |  -> List(Diagnostic(Range(Position(2,28),Position(2,28)),Some(Error),Some(_),Some(_),type mismatch;  found   : Int  required: String,None,None,None))
             |  -> reset = true
             |#2: task finish 4
             |  -> errors 1, warnings 0
@@ -882,7 +881,7 @@ object DeduplicationSpec extends bloop.bsp.BspBaseSuite {
             """
               |request received: build/initialize
               |BSP initialization handshake complete.
-              |Cancelling request "5"
+              |Cancelling request Number(5.0)
           """.stripMargin
           )
 

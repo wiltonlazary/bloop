@@ -4,14 +4,13 @@ import scala.concurrent.duration.FiniteDuration
 
 import bloop.cli.BspProtocol
 import bloop.cli.ExitStatus
-import bloop.internal.build.BuildInfo
 import bloop.io.Environment.lineSeparator
 import bloop.logging.BspClientLogger
 import bloop.logging.RecordingLogger
+import bloop.task.Task
 import bloop.util.TestProject
 import bloop.util.TestUtil
 
-import monix.eval.Task
 import monix.execution.ExecutionModel
 import monix.execution.Scheduler
 
@@ -37,7 +36,7 @@ class BspConnectionSpec(
         Task {
           val logger = new RecordingLogger(ansiCodesSupported = false)
           val bspLogger = new BspClientLogger(logger)
-          val bspCommand = createBspCommand(configDir)
+          def bspCommand() = createBspCommand(configDir)
           val state = TestUtil.loadTestProject(configDir.underlying, logger)
 
           // Run the clients on our own unbounded IO scheduler to allow client concurrency
@@ -89,55 +88,14 @@ class BspConnectionSpec(
   }
 
   def checkConnectionIsInitialized(logger: RecordingLogger): Unit = {
-    val jsonrpc = logger.debugs.filter(_.startsWith(" -->"))
+    val contentLogs = logger.debugs.flatMap(_.split("\n")).filter(_.startsWith("  --> content:"))
     // Filter out the initialize request that contains platform-specific details
-    val allButInitializeRequest = jsonrpc.filterNot(_.contains("""build/initialize""""))
+    val allButInitializeRequest = contentLogs.filterNot(_.contains("""build/initialize""""))
     assertNoDiff(
       allButInitializeRequest.mkString(lineSeparator),
-      s"""| --> {
-          |  "result" : {
-          |    "displayName" : "${BuildInfo.bloopName}",
-          |    "version" : "${BuildInfo.version}",
-          |    "bspVersion" : "${BuildInfo.bspVersion}",
-          |    "capabilities" : {
-          |      "compileProvider" : {
-          |        "languageIds" : [
-          |          "scala",
-          |          "java"
-          |        ]
-          |      },
-          |      "testProvider" : {
-          |        "languageIds" : [
-          |          "scala",
-          |          "java"
-          |        ]
-          |      },
-          |      "runProvider" : {
-          |        "languageIds" : [
-          |          "scala",
-          |          "java"
-          |        ]
-          |      },
-          |      "inverseSourcesProvider" : true,
-          |      "dependencySourcesProvider" : true,
-          |      "resourcesProvider" : true,
-          |      "buildTargetChangedProvider" : false,
-          |      "jvmTestEnvironmentProvider" : true,
-          |      "jvmRunEnvironmentProvider" : true,
-          |      "canReload" : false
-          |    },
-          |    "data" : null
-          |  },
-          |  "id" : "2",
-          |  "jsonrpc" : "2.0"
-          |}
-          | --> {
-          |  "method" : "build/initialized",
-          |  "params" : {
-          |    
-          |  },
-          |  "jsonrpc" : "2.0"
-          |}""".stripMargin
+      s"""|
+          |  --> content: ${TestConstants.buildInitialize}
+          |  --> content: {"method":"build/initialized","params":{},"jsonrpc":"2.0"}""".stripMargin
     )
   }
 
@@ -215,7 +173,7 @@ class BspConnectionSpec(
       def createHangingCompilationViaBsp: Task[Unit] = {
         Task {
           val bspLogger = new BspClientLogger(logger)
-          val bspCommand = createBspCommand(configDir)
+          def bspCommand() = createBspCommand(configDir)
           val state = TestUtil.loadTestProject(configDir.underlying, logger)
 
           // Run the clients on our own unbounded IO scheduler to allow client concurrency
@@ -252,15 +210,15 @@ class BspConnectionSpec(
             import ch.epfl.scala.bsp
             import ch.epfl.scala.bsp.endpoints.BuildTarget
 
-            bspState.client0
-              .requestAndForget(
-                BuildTarget.compile.method,
-                bsp.CompileParams(List(target), None, None)
-              )
-              .flatMap { _ =>
-                // Wait until observable is completed, which means server is done
-                bspState.serverStates.foreachL(_ => ())
-              }
+            val req = bspState.client0.request(
+              BuildTarget.compile,
+              bsp.CompileParams(List(target), None, None)
+            )
+            req.runAsync(ExecutionContext.ioScheduler)
+            // Wait until observable is completed, which means server is done
+            Task.liftMonixTaskUncancellable(
+              bspState.serverStates.foreachL(_ => ())
+            )
           }
         }.flatten
       }

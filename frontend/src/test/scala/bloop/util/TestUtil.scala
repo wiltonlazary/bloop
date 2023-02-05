@@ -12,15 +12,16 @@ import scala.concurrent.ExecutionException
 import scala.concurrent.duration.Duration
 import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.duration.TimeUnit
-import scala.meta.jsonrpc.Services
 import scala.tools.nsc.Properties
 import scala.util.control.NonFatal
 
 import bloop.CompilerCache
 import bloop.ScalaInstance
+import bloop.bsp.BloopRpcServices
 import bloop.cli.Commands
 import bloop.config.Config
 import bloop.config.Config.CompileOrder
+import bloop.config.Tag
 import bloop.data.JdkConfig
 import bloop.data.LoadedProject
 import bloop.data.Origin
@@ -34,6 +35,7 @@ import bloop.engine.Interpreter
 import bloop.engine.Run
 import bloop.engine.State
 import bloop.engine.caches.ResultsCache
+import bloop.engine.caches.SourceGeneratorCache
 import bloop.io.AbsolutePath
 import bloop.io.Environment.LineSplitter
 import bloop.io.Environment.lineSeparator
@@ -46,11 +48,12 @@ import bloop.logging.DebugFilter
 import bloop.logging.Logger
 import bloop.logging.RecordingLogger
 
-import _root_.monix.eval.Task
+import _root_.bloop.task.Task
 import _root_.monix.execution.Scheduler
 import org.junit.Assert
 import sbt.internal.inc.BloopComponentCompiler
 import xsbti.ComponentProvider
+import java.lang.management.ManagementFactory
 
 object TestUtil {
   def projectDir(base: Path, name: String): Path = base.resolve(name)
@@ -76,10 +79,7 @@ object TestUtil {
   def getCompilerCache(logger: Logger): CompilerCache = synchronized {
     if (singleCompilerCache != null) singleCompilerCache.withLogger(logger)
     else {
-      val scheduler = ExecutionContext.ioScheduler
-      val jars = bloop.io.Paths.getCacheDirectory("scala-jars")
-      singleCompilerCache =
-        new CompilerCache(componentProvider, jars, logger, Nil, None, None, scheduler)
+      singleCompilerCache = new CompilerCache(componentProvider, logger)
       singleCompilerCache
     }
   }
@@ -256,7 +256,8 @@ object TestUtil {
     }
     val workspaceSettings = WorkspaceSettings.readFromFile(configDirectory, logger)
     val build = Build(configDirectory, transformedProjects, workspaceSettings)
-    val state = State.forTests(build, TestUtil.getCompilerCache(logger), logger)
+    val state =
+      State.forTests(build, TestUtil.getCompilerCache(logger), SourceGeneratorCache.empty, logger)
     val state1 = state.copy(commonOptions = state.commonOptions.copy(env = runAndTestProperties))
     if (!emptyResults) state1 else state1.copy(results = ResultsCache.emptyForTests)
   }
@@ -321,7 +322,8 @@ object TestUtil {
       jdkConfig: JdkConfig = JdkConfig.default,
       order: CompileOrder = Config.Mixed,
       userLogger: Option[Logger] = None,
-      extraJars: Array[AbsolutePath] = Array()
+      extraJars: Array[AbsolutePath] = Array(),
+      testProjects: Set[String] = Set.empty
   )(op: State => T): T = {
     withinWorkspace { temp =>
       val logger = userLogger.getOrElse(BloopLogger.default(temp.toString))
@@ -329,11 +331,24 @@ object TestUtil {
         case (name, sources) =>
           val instance1 = Some(instance)
           val deps = dependenciesMap.getOrElse(name, Set.empty)
-          makeProject(temp, name, sources, deps, instance1, jdkConfig, logger, order, extraJars)
+          val tags = if (testProjects.contains(name)) Tag.Test :: Nil else Nil
+          makeProject(
+            temp,
+            name,
+            sources,
+            deps,
+            instance1,
+            jdkConfig,
+            logger,
+            order,
+            extraJars,
+            tags
+          )
       }
       val loaded = projects.map(p => LoadedProject.RawProject(p))
       val build = Build(temp, loaded.toList, None)
-      val state = State.forTests(build, TestUtil.getCompilerCache(logger), logger)
+      val state =
+        State.forTests(build, TestUtil.getCompilerCache(logger), SourceGeneratorCache.empty, logger)
       try op(state)
       catch {
         case NonFatal(t) =>
@@ -367,7 +382,8 @@ object TestUtil {
       jdkConfig: JdkConfig,
       logger: Logger,
       compileOrder: CompileOrder,
-      extraJars: Array[AbsolutePath]
+      extraJars: Array[AbsolutePath],
+      tags: List[String]
   ): Project = {
     val origin = syntheticOriginFor(baseDir)
     val baseDirectory = projectDir(baseDir.underlying, name)
@@ -402,6 +418,7 @@ object TestUtil {
       sources = sourceDirectories,
       sourcesGlobs = Nil,
       sourceRoots = None,
+      sourceGenerators = Nil,
       testFrameworks = testFrameworks,
       testOptions = Config.TestOptions.empty,
       out = out,
@@ -409,7 +426,7 @@ object TestUtil {
       platform = Project.defaultPlatform(logger, classpath, Nil, Some(jdkConfig)),
       sbt = None,
       resolution = None,
-      tags = Nil,
+      tags = tags,
       origin = origin
     )
   }
@@ -460,9 +477,15 @@ object TestUtil {
 
   /** Creates an empty workspace where operations can happen. */
   def withinWorkspace[T](op: AbsolutePath => T): T = {
-    val temp = Files.createTempDirectory("bloop-test-workspace")
+    val temp = Files.createTempDirectory("bloop-test-workspace").toRealPath()
     try op(AbsolutePath(temp))
     finally delete(AbsolutePath(temp))
+  }
+
+  /** Creates an empty workspace where operations can happen. */
+  def withinWorkspace[T](op: AbsolutePath => Task[T]): Task[T] = {
+    val temp = Files.createTempDirectory("bloop-test-workspace").toRealPath()
+    op(AbsolutePath(temp)).doOnFinish(_ => Task(delete(AbsolutePath(temp))))
   }
 
   def withTemporaryFile[T](op: Path => T): T = {
@@ -517,7 +540,7 @@ object TestUtil {
     val classesDir = Files.createDirectory(outDir.resolve("classes"))
 
     // format: OFF
-    val configFileG = bloop.config.Config.File(Config.File.LatestVersion, Config.Project("g", baseDir, Option(baseDir), Nil, None, None, List("g"), Nil, outDir, classesDir, None, None, None, None, None, None, None, None))
+    val configFileG = bloop.config.Config.File(Config.File.LatestVersion, Config.Project("g", baseDir, Option(baseDir), Nil, None, None, List("g"), Nil, outDir, classesDir, None, None, None, None, None, None, None, None, None))
     bloop.config.write(configFileG, jsonTargetG)
     // format: ON
 
@@ -527,7 +550,7 @@ object TestUtil {
   def createTestServices(
       addDiagnosticsHandler: Boolean,
       logger0: BspClientLogger[_]
-  ): Services = {
+  ): BloopRpcServices = {
     implicit val ctx: DebugFilter = DebugFilter.Bsp
     import ch.epfl.scala.bsp
     import ch.epfl.scala.bsp.endpoints
@@ -539,7 +562,7 @@ object TestUtil {
       }
     }
 
-    val rawServices = Services
+    val rawServices = BloopRpcServices
       .empty(logger0)
       .notification(endpoints.Build.showMessage) {
         case bsp.ShowMessageParams(bsp.MessageType.Log, _, o, msg) => logger.debug(fmt(msg, o))
@@ -611,19 +634,10 @@ object TestUtil {
   }
 
   def threadDump: String = {
-    // Get the PID of the current JVM process
-    val selfName = java.lang.management.ManagementFactory.getRuntimeMXBean().getName()
-    val selfPid = selfName.substring(0, selfName.indexOf('@'))
-
-    // Attach to the VM
-    import com.sun.tools.attach.VirtualMachine
-    import sun.tools.attach.HotSpotVirtualMachine;
-    val vm = VirtualMachine.attach(selfPid);
-    val hotSpotVm = vm.asInstanceOf[HotSpotVirtualMachine];
-
-    // Request a thread dump
-    val inputStream = hotSpotVm.remoteDataDump()
-    try new String(Stream.continually(inputStream.read).takeWhile(_ != -1).map(_.toByte).toArray)
-    finally inputStream.close()
+    val sb = new StringBuilder
+    val mxBean = ManagementFactory.getThreadMXBean()
+    val stacktraces = mxBean.dumpAllThreads(true, true)
+    stacktraces.foreach(threadInfo => sb.append(threadInfo.toString()).append("\n"))
+    sb.result()
   }
 }

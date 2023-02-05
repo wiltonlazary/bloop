@@ -30,9 +30,9 @@ import bloop.reporter.ObservedReporter
 import bloop.reporter.Reporter
 import bloop.reporter.ReporterAction
 import bloop.reporter.ReporterInputs
+import bloop.task.Task
 import bloop.tracing.BraveTracer
 
-import monix.eval.Task
 import monix.execution.CancelableFuture
 import monix.reactive.MulticastStrategy
 import monix.reactive.Observable
@@ -190,7 +190,7 @@ object CompileTask {
                     .fromFuture(runningTasks)
                     .executeOn(ExecutionContext.ioScheduler)
                   val populatingTask = {
-                    if (s.isNoOp) blockingOnRunningTasks //Task.unit
+                    if (s.isNoOp) blockingOnRunningTasks // Task.unit
                     else {
                       for {
                         _ <- blockingOnRunningTasks
@@ -250,12 +250,25 @@ object CompileTask {
       val dir = state.client.getUniqueClassesDirFor(inputs.project, forceGeneration = true)
       val underlying = createReporter(ReporterInputs(inputs.project, cwd, rawLogger))
       val reporter = new ObservedReporter(logger, underlying)
-      CompileBundle.computeFrom(inputs, dir, reporter, last, prev, cancel, logger, obs, t, o)
+      val sourceGeneratorCache = state.sourceGeneratorCache
+      CompileBundle.computeFrom(
+        inputs,
+        sourceGeneratorCache,
+        dir,
+        reporter,
+        last,
+        prev,
+        cancel,
+        logger,
+        obs,
+        t,
+        o
+      )
     }
 
     val client = state.client
     CompileGraph.traverse(dag, client, store, setup(_), compile(_)).flatMap { pdag =>
-      val partialResults = Dag.dfs(pdag)
+      val partialResults = Dag.dfs(pdag, mode = Dag.PreOrder)
       val finalResults = partialResults.map(r => PartialCompileResult.toFinalResult(r))
       Task.gatherUnordered(finalResults).map(_.flatten).flatMap { results =>
         val cleanUpTasksToRunInBackground =
@@ -389,7 +402,7 @@ object CompileTask {
       parallelUnits: Int = Runtime.getRuntime().availableProcessors()
   ): Unit = {
     val aggregatedTask = Task.sequence(
-      tasks.toList.grouped(parallelUnits).map(group => Task.gatherUnordered(group))
+      tasks.toList.grouped(parallelUnits).map(group => Task.gatherUnordered(group)).toList
     )
     aggregatedTask.map(_ => ()).runAsync(ExecutionContext.ioScheduler)
     ()
@@ -442,10 +455,10 @@ object CompileTask {
     previousReadOnlyToDelete match {
       case None => Task.unit
       case Some(classesDir) =>
-        Task.fork(Task.eval {
+        Task.eval {
           logger.debug(s"Deleting contents of orphan dir $classesDir")
           BloopPaths.delete(classesDir)
-        })
+        }.asyncBoundary
     }
   }
 }

@@ -21,13 +21,13 @@ import bloop.engine.{
   Run,
   State
 }
-import bloop.engine.caches.ResultsCache
+import bloop.engine.caches.{ResultsCache, SourceGeneratorCache}
 import bloop.io.AbsolutePath
 import bloop.logging.{BloopLogger, Logger, NoopLogger}
-import monix.eval.Task
-import monix.execution.misc.NonFatal
+import bloop.task.Task
 import bloop.engine.tasks.compilation.CompileGatekeeper
 import sbt.internal.inc.BloopComponentCompiler
+import scala.util.control.NonFatal
 
 object CommunityBuild
     extends CommunityBuild(
@@ -38,7 +38,7 @@ object CommunityBuild
     if (builds.isEmpty) {
       System.err.println(s"❌  No builds were found in buildpress home $buildpressHomeDir")
     } else {
-      val buildsToCompile = builds //.filter(_._1 == "prisma")
+      val buildsToCompile = builds // .filter(_._1 == "prisma")
       buildsToCompile.foreach {
         case (buildName, buildBaseDir) =>
           compileProject(buildBaseDir)
@@ -83,11 +83,9 @@ abstract class CommunityBuild(val buildpressHomeDir: AbsolutePath) {
 
   val compilerCache: CompilerCache = {
     import bloop.io.Paths
-    val scheduler = ExecutionContext.ioScheduler
-    val jars = Paths.getCacheDirectory("scala-jars")
     val provider =
       BloopComponentCompiler.getComponentProvider(Paths.getCacheDirectory("components"))
-    new CompilerCache(provider, jars, NoopLogger, Nil, None, None, scheduler)
+    new CompilerCache(provider, NoopLogger)
   }
 
   def loadStateForBuild(configDirectory: AbsolutePath, logger: Logger): State = {
@@ -95,7 +93,7 @@ abstract class CommunityBuild(val buildpressHomeDir: AbsolutePath) {
     val loadedProjects = BuildLoader.loadSynchronously(configDirectory, logger)
     val workspaceSettings = WorkspaceSettings.readFromFile(configDirectory, logger)
     val build = Build(configDirectory, loadedProjects, workspaceSettings)
-    val state = State.forTests(build, compilerCache, logger)
+    val state = State.forTests(build, compilerCache, SourceGeneratorCache.empty, logger)
     state.copy(results = ResultsCache.emptyForTests)
   }
 
@@ -139,6 +137,7 @@ abstract class CommunityBuild(val buildpressHomeDir: AbsolutePath) {
         sources = Nil,
         sourcesGlobs = Nil,
         sourceRoots = None,
+        sourceGenerators = Nil,
         testFrameworks = Nil,
         testOptions = Config.TestOptions.empty,
         out = dummyClassesDir,
@@ -152,7 +151,7 @@ abstract class CommunityBuild(val buildpressHomeDir: AbsolutePath) {
 
       val newLoaded = LoadedProject.RawProject(rootProject) :: allProjectsInBuild
       val state = initialState.copy(build = initialState.build.copy(loadedProjects = newLoaded))
-      val allReachable = Dag.dfs(state.build.getDagFor(rootProject))
+      val allReachable = Dag.dfs(state.build.getDagFor(rootProject), Dag.PreOrder)
       val reachable = allReachable.filter(_ != rootProject)
       val cleanAction = Run(Commands.Clean(reachable.map(_.name)), Exit(ExitStatus.Ok))
       val cleanedState = execute(cleanAction, state)
@@ -170,12 +169,12 @@ abstract class CommunityBuild(val buildpressHomeDir: AbsolutePath) {
           List(rootProjectName),
           incremental = true,
           pipeline = isPipeliningEnabled
-          //cliOptions = CliOptions.default.copy(verbose = true)
+          // cliOptions = CliOptions.default.copy(verbose = true)
         ),
         Exit(ExitStatus.Ok)
       )
 
-      val verboseState = cleanedState //.copy(logger = state.logger.asVerbose)
+      val verboseState = cleanedState // .copy(logger = state.logger.asVerbose)
       val compiledState = execute(action, verboseState)
       assert(compiledState.status.isOk)
       reachable.foreach { project =>

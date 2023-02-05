@@ -9,9 +9,9 @@ import scala.util.control.NonFatal
 
 import bloop.logging.ObservedLogger
 import bloop.reporter.ZincReporter
+import bloop.task.Task
 import bloop.tracing.BraveTracer
 
-import monix.eval.Task
 import sbt.internal.inc.AnalyzingCompiler
 import sbt.internal.inc.CompileConfiguration
 import sbt.internal.inc.JavaInterfaceUtil.EnrichOption
@@ -133,6 +133,10 @@ final class BloopHighLevelCompiler(
               logger
             )
           } catch {
+            case t: StackOverflowError =>
+              val msg = "Encountered a StackOverflowError coming from the compiler. You might need to restart your Bloop build server"
+              logger.error(s"${msg}:\n${t.getStackTrace().mkString("\n")}")
+              throw new CompileFailed(new Array(0), msg, new Array(0), t)
             case NonFatal(t) =>
               // If scala compilation happens, complete the java promise so that it doesn't block
               JavaCompleted.tryFailure(t)

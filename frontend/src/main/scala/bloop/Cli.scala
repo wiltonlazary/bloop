@@ -20,10 +20,10 @@ import bloop.io.Paths
 import bloop.logging.BloopLogger
 import bloop.logging.DebugFilter
 import bloop.logging.Logger
+import bloop.task.Task
 import bloop.util.CrossPlatform
 import bloop.util.JavaRuntime
 
-import _root_.monix.eval.Task
 import caseapp.core.help.Help
 import com.martiansoftware.nailgun.NGContext
 import monix.execution.atomic.AtomicBoolean
@@ -89,8 +89,16 @@ object Cli {
       else parse(args, nailgunOptions)
     }
 
-    val exitStatus = run(cmd, NailgunPool(ngContext))
-    ngContext.exit(exitStatus.code)
+    try {
+      val exitStatus = run(cmd, NailgunPool(ngContext))
+      ngContext.exit(exitStatus.code)
+    } catch {
+      case x: java.util.concurrent.ExecutionException =>
+        // print stack trace of fatal errors thrown in asynchronous code, see https://stackoverflow.com/questions/17265022/what-is-a-boxed-error-in-scala
+        // the stack trace is somehow propagated all the way to the client when printing this
+        x.getCause.printStackTrace(ngContext.out)
+        ngContext.exit(ExitStatus.UnexpectedError.code)
+    }
   }
 
   val commands: Seq[String] = Commands.RawCommand.help.messages.flatMap(_._1.headOption.toSeq)
@@ -371,7 +379,7 @@ object Cli {
 
       val session = runTaskWithCliClient(configDirectory, action, taskToInterpret, pool, logger)
       val exitSession = Task.defer {
-        cleanUpNonStableCliDirectories(session.client, cliOptions.common.ngout)
+        cleanUpNonStableCliDirectories(session.client)
       }
 
       session.task
@@ -430,22 +438,21 @@ object Cli {
   }
 
   def cleanUpNonStableCliDirectories(
-      client: CliClientInfo,
-      out: PrintStream
+      client: CliClientInfo
   ): Task[Unit] = {
     if (client.useStableCliDirs) Task.unit
     else {
       val deleteTasks = client.getCreatedCliDirectories.map { freshDir =>
         if (!freshDir.exists) Task.unit
         else {
-          out.println(s"Preparing to delete dir ${freshDir}")
-          Task.eval(Paths.delete(freshDir)).executeWithFork
+          Task.eval(Paths.delete(freshDir)).asyncBoundary
         }
       }
 
       val groups = deleteTasks
         .grouped(4)
         .map(group => Task.gatherUnordered(group).map(_ => ()))
+        .toList
 
       Task
         .sequence(groups)

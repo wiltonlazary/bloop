@@ -11,11 +11,11 @@ import scala.concurrent.Promise
 import scala.util.Failure
 import scala.util.Success
 import scala.util.Try
+import scala.util.control.NonFatal
 
 import monix.execution.Cancelable
 import monix.execution.CancelableFuture
-import monix.execution.cancelables.SingleAssignmentCancelable
-import monix.execution.misc.NonFatal
+import monix.execution.cancelables.SingleAssignCancelable
 import monix.execution.schedulers.TrampolinedRunnable
 
 /**
@@ -58,7 +58,7 @@ object Java8Compat {
   )(implicit ec: ExecutionContext): CancelableFuture[A] = {
 
     val p = Promise[A]()
-    val cRef = SingleAssignmentCancelable()
+    val cRef = SingleAssignCancelable()
 
     // Light async boundary to guard against stack overflows
     ec.execute(new TrampolinedRunnable {

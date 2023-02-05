@@ -13,6 +13,7 @@ import bloop.bsp.ProjectUris
 import bloop.config.Config
 import bloop.config.Config.Platform
 import bloop.config.ConfigCodecs
+import bloop.config.Tag
 import bloop.data.ClientInfo.CliClientInfo
 import bloop.data.JdkConfig
 import bloop.io.AbsolutePath
@@ -110,7 +111,8 @@ abstract class BaseTestProject {
       runtimeJvmConfig: Option[Config.JvmConfig] = None,
       order: Config.CompileOrder = Config.Mixed,
       jars: Array[AbsolutePath] = Array(),
-      sourcesGlobs: List[Config.SourcesGlobs] = Nil
+      sourcesGlobs: List[Config.SourcesGlobs] = Nil,
+      sourceGenerators: List[Config.SourceGenerator] = Nil
   ): TestProject = {
     val projectBaseDir = Files.createDirectories(baseDir.underlying.resolve(name))
     val ProjectArchetype(sourceDir, outDir, resourceDir, classes, runtimeResourceDir) =
@@ -198,7 +200,9 @@ abstract class BaseTestProject {
       test = Some(testConfig),
       platform = Some(platform),
       resolution = None,
-      tags = None
+      tags = if (enableTests) Some(Tag.Test :: Nil) else None,
+      if (sourceGenerators.isEmpty) None
+      else Some(sourceGenerators)
     )
 
     TestProject(config, Some(directDependencies))

@@ -26,10 +26,10 @@ import bloop.engine.tasks.compilation.CompileDefinitions.CompileTraversal
 import bloop.logging.DebugFilter
 import bloop.logging.LoggerAction
 import bloop.reporter.ReporterAction
+import bloop.task.Task
 import bloop.util.JavaCompat.EnrichOptional
 import bloop.util.SystemProperties
 
-import monix.eval.Task
 import xsbti.compile.PreviousResult
 
 object CompileGraph {
@@ -244,7 +244,7 @@ object CompileGraph {
           runningCompilation.traversal.executeOn(ExecutionContext.ioScheduler)
 
         val deduplicateStreamSideEffectsHandle =
-          replayEventsTask.runAsync(ExecutionContext.ioScheduler)
+          replayEventsTask.runToFuture(ExecutionContext.ioScheduler)
 
         /**
          * Deduplicate and change the implementation of the task returning the
@@ -349,7 +349,7 @@ object CompileGraph {
                 logger.displayWarningToUser(
                   s"""Disconnecting from deduplication of ongoing compilation for '${inputs.project.name}'
                      |No progress update for ${(disconnectionTime: FiniteDuration)
-                    .toString()} caused bloop to cancel compilation and schedule a new compile.
+                      .toString()} caused bloop to cancel compilation and schedule a new compile.
                   """.stripMargin
                 )
 
@@ -432,7 +432,7 @@ object CompileGraph {
                   Task.now(Parent(PartialFailure(project, BlockURI, blocked), dagResults))
                 } else {
                   val results: List[PartialSuccess] = {
-                    val transitive = dagResults.flatMap(Dag.dfs(_)).distinct
+                    val transitive = dagResults.flatMap(Dag.dfs(_, mode = Dag.PreOrder)).distinct
                     transitive.collect { case s: PartialSuccess => s }
                   }
 

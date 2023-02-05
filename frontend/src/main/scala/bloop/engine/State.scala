@@ -6,12 +6,13 @@ import bloop.cli.ExitStatus
 import bloop.data.ClientInfo
 import bloop.data.WorkspaceSettings
 import bloop.engine.caches.ResultsCache
+import bloop.engine.caches.SourceGeneratorCache
 import bloop.engine.caches.StateCache
 import bloop.io.Paths
 import bloop.logging.DebugFilter
 import bloop.logging.Logger
+import bloop.task.Task
 
-import monix.eval.Task
 import sbt.internal.inc.BloopComponentCompiler
 
 /**
@@ -32,6 +33,7 @@ final case class State private[engine] (
     build: Build,
     results: ResultsCache,
     compilerCache: CompilerCache,
+    sourceGeneratorCache: SourceGeneratorCache,
     client: ClientInfo,
     pool: ClientPool,
     commonOptions: CommonOptions,
@@ -49,21 +51,34 @@ object State {
   private def getCompilerCache(logger: Logger): CompilerCache = synchronized {
     if (singleCompilerCache != null) singleCompilerCache.withLogger(logger)
     else {
-      val scheduler = ExecutionContext.ioScheduler
       val componentsDir = Paths.getCacheDirectory("components")
       val provider = BloopComponentCompiler.getComponentProvider(componentsDir)
-      val jars = Paths.getCacheDirectory("scala-jars")
-      singleCompilerCache = new CompilerCache(provider, jars, logger, Nil, None, None, scheduler)
+      singleCompilerCache = new CompilerCache(provider, logger)
       singleCompilerCache
     }
   }
 
-  private[bloop] def forTests(build: Build, compilerCache: CompilerCache, logger: Logger): State = {
+  private[bloop] def forTests(
+      build: Build,
+      compilerCache: CompilerCache,
+      sourceGeneratorCache: SourceGeneratorCache,
+      logger: Logger
+  ): State = {
     val opts = CommonOptions.default
     val cwd = opts.workingPath
     val clientInfo = ClientInfo.CliClientInfo(useStableCliDirs = true, () => true)
     val results = ResultsCache.load(build, cwd, cleanOrphanedInternalDirs = false, logger)
-    State(build, results, compilerCache, clientInfo, NoPool, opts, ExitStatus.Ok, logger)
+    State(
+      build,
+      results,
+      compilerCache,
+      sourceGeneratorCache,
+      clientInfo,
+      NoPool,
+      opts,
+      ExitStatus.Ok,
+      logger
+    )
   }
 
   def apply(
@@ -76,7 +91,18 @@ object State {
     val cwd = opts.workingPath
     val results = ResultsCache.load(build, cwd, cleanOrphanedInternalDirs = true, logger)
     val compilerCache = getCompilerCache(logger)
-    State(build, results, compilerCache, client, pool, opts, ExitStatus.Ok, logger)
+    val sourceGeneratorCache = SourceGeneratorCache.empty
+    State(
+      build,
+      results,
+      compilerCache,
+      sourceGeneratorCache,
+      client,
+      pool,
+      opts,
+      ExitStatus.Ok,
+      logger
+    )
   }
 
   /**

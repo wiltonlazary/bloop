@@ -6,9 +6,9 @@ import scala.concurrent.Promise
 import bloop.UniqueCompileInputs
 import bloop.logging.ObservedLogger
 import bloop.reporter.ZincReporter
+import bloop.task.Task
 import bloop.tracing.BraveTracer
 
-import monix.eval.Task
 import sbt.internal.inc.Analysis
 import sbt.internal.inc.CompileConfiguration
 import sbt.internal.inc.CompileOutput
@@ -201,14 +201,14 @@ object BloopZincCompiler {
           /* Hard-code these to use the `Equiv` defined in this class. For
            * some reason, `Equiv[Nothing]` or an equivalent is getting injected
            * into here now, and it's borking all our results. This fixes it. */
-          //def sameOutput = MiniSetupUtil.equivOutput.equiv(a.output, b.output)
+          // def sameOutput = MiniSetupUtil.equivOutput.equiv(a.output, b.output)
           def sameOptions = MiniSetupUtil.equivOpts.equiv(a.options, b.options)
           def sameCompiler = MiniSetupUtil.equivCompilerVersion.equiv(a.compilerVersion, b.compilerVersion)
           def sameOrder = a.order == b.order
           def sameExtra = MiniSetupUtil.equivPairs.equiv(a.extra, b.extra)
 
           // Don't compare outputs because bloop changes them across compiler runs
-          //sameOutput &&
+          // sameOutput &&
           sameOptions &&
           sameCompiler &&
           sameOrder &&

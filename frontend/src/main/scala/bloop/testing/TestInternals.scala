@@ -18,8 +18,8 @@ import bloop.exec.JvmProcessForker
 import bloop.io.AbsolutePath
 import bloop.logging.DebugFilter
 import bloop.logging.Logger
+import bloop.task.Task
 
-import monix.eval.Task
 import monix.execution.atomic.AtomicBoolean
 import org.scalatools.testing.{Framework => OldFramework}
 import sbt.internal.inc.Analysis
@@ -46,7 +46,7 @@ final case class FingerprintInfo[+Print <: Fingerprint](
 object TestInternals {
   private final val sbtOrg = "org.scala-sbt"
   private final val testAgentId = "test-agent"
-  private final val testAgentVersion = "1.4.4"
+  private final val testAgentVersion = "1.8.0"
 
   private implicit val logContext: DebugFilter = DebugFilter.Test
 
@@ -170,10 +170,10 @@ object TestInternals {
       }
     }
 
-    runner
-      .delayExecutionWith(listener.startServer)
-      .executeOn(ExecutionContext.ioScheduler)
-      .doOnCancel(Task(cancel()))
+    listener.startServer *>
+      runner
+        .executeOn(ExecutionContext.ioScheduler)
+        .doOnCancel(Task(cancel()))
   }
 
   /**

@@ -7,9 +7,10 @@ import bloop.engine.Dag
 import bloop.engine.Leaf
 import bloop.engine.Parent
 import bloop.reporter.Problem
+import bloop.task.Task
 import bloop.util.CacheHashCode
 
-import monix.eval.Task
+import scalaz.Cord
 
 sealed trait CompileResult[+R] {
   def result: R
@@ -135,5 +136,6 @@ object FinalCompileResult {
           }
       }
     }
+    override def show(f: FinalCompileResult): Cord = Cord(shows(f))
   }
 }

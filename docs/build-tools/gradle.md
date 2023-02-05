@@ -10,13 +10,21 @@ Configuring bloop in your Gradle projects will speed up your Scala
 development significantly. It is highly recommended to use Bloop in Gradle
 because Gradle has a pretty long development cycle and it takes a long time
 to do basic build operations such as compilation or running an application.
+
+The Gradle plugin lives in its own repository at
+[scalacenter/gradle-bloop](https://github.com/scalacenter/gradle-bloop). Please
+do report any issues with the Gradle integration there!
+
 Learn how to get set up by following the instructions below.
 
 <!-- start -->
 
 ## Requirements
 
-- At least Gradle `v4.3`, latest (tested) supported version is `v6.1`
+- For Scala 2: at least Gradle `v5.0`
+- For Scala 3: at least Gradle `v7.3`
+- For Android: at least Gradle `v6.1.1`
+- Latest (tested) supported version is `v7.5`
 
 ## Install the plugin
 
@@ -25,8 +33,6 @@ Here is a list of the latest Bloop stable and development versions.
 ```scala mdoc:releases
 I am going to be replaced by the docs infrastructure.
 ```
-
-
 
 Add bloop to your `build.gradle` with:
 
@@ -38,17 +44,19 @@ buildscript {
   }
 
   dependencies {
-    classpath 'ch.epfl.scala:gradle-bloop_2.12:@VERSION@'
+    classpath 'ch.epfl.scala:gradle-bloop_2.12:@BLOOP_GRADLE_VERSION@'
   }
 }
 ```
-
 
 Then, enable bloop in all your Gradle projects with:
 
 ```gradle
 allprojects {
-  apply plugin: 'bloop'
+  // test is for compatibility with Metals import
+  if (!plugins.hasPlugin("bloop")) {
+    apply plugin: "bloop"
+  }
 }
 ```
 
@@ -147,5 +155,7 @@ If your build only has a handful of Scala/Java projects and you don't want to
 enable Bloop in all projects by default, you can selectively enable bloop with:
 
 ```groovy
-apply plugin: 'bloop'
+if (!plugins.hasPlugin("bloop")) {
+  apply plugin: "bloop"
+}
 ```

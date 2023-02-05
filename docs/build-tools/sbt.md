@@ -21,6 +21,11 @@ Install bloop by adding the following line to your `project/plugins.sbt`:
 addSbtPlugin("ch.epfl.scala" % "sbt-bloop" % "@VERSION@")
 ```
 
+If this does not work due to using an internal Artifactory, use instead:
+```sbt
+libraryDependencies += "ch.epfl.scala" % "sbt-bloop_2.12_1.0" % "@VERSION@"
+```
+
 After that, start up sbt or reload your sbt shell to load the plugin.
 
 ## Export your build
@@ -220,8 +225,8 @@ classifier.
 
 ### Export main class from sbt
 
-If you want bloop to export `mainClass` from your build definition, define either of the following
-settings in your `build.sbt`:
+If you want bloop to export `mainClass` from your build definition, define the following
+setting in your `build.sbt`:
 
 ```scala
 (Compile / run / bloopMainClass) := Some("foo.App")

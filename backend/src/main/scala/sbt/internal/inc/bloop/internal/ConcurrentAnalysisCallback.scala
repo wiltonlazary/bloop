@@ -134,7 +134,7 @@ final class ConcurrentAnalysisCallback(
       val map = if (reported) reportedProblems else unreportedProblems
       map
         .getOrElseUpdate(source.toPath(), new ConcurrentLinkedQueue)
-        .add(InterfaceUtil.problem(category, pos, msg, severity, None))
+        .add(InterfaceUtil.problem(category, pos, msg, severity, None, None, Nil))
     }
   }
 
@@ -231,7 +231,7 @@ final class ConcurrentAnalysisCallback(
       srcClassName: String
   ): Unit = {
     val sourcePath = converter.toPath(source)
-    //println(s"Generated non local class ${source}, ${classFile}, ${binaryClassName}, ${srcClassName}")
+    // println(s"Generated non local class ${source}, ${classFile}, ${binaryClassName}, ${srcClassName}")
     add(nonLocalClasses, sourcePath, (classFile, binaryClassName))
     add(classNames, sourcePath, (srcClassName, binaryClassName))
     classToSource.put(classFile, srcClassName)

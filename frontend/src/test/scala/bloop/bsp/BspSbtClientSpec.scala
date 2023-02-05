@@ -8,10 +8,9 @@ import bloop.cli.BspProtocol
 import bloop.cli.ExitStatus
 import bloop.engine.ExecutionContext
 import bloop.logging.RecordingLogger
+import bloop.task.Task
 import bloop.util.TestProject
 import bloop.util.TestUtil
-
-import monix.eval.Task
 
 object TcpBspSbtClientSpec extends BspSbtClientSpec(BspProtocol.Tcp)
 
@@ -286,7 +285,7 @@ class BspSbtClientSpec(
             |  -> Msg: Compiling a (1 Scala source)
             |  -> Data kind: compile-task
             |#2: a/src/main/scala/Foo.scala
-            |  -> List(Diagnostic(Range(Position(1,3),Position(1,3)),Some(Error),Some(_),Some(_),';' expected but 'def' found.,None))
+            |  -> List(Diagnostic(Range(Position(1,3),Position(1,3)),Some(Error),Some(_),Some(_),';' expected but 'def' found.,None,None,None))
             |  -> reset = true
             |#2: task finish 2
             |  -> errors 1, warnings 0
@@ -326,8 +325,8 @@ class BspSbtClientSpec(
       originId: String,
       logger: RecordingLogger
   ): ManagedBspTestState = {
-    val allCompilationTasks = projects.map(
-      project => state.compileTask(project, originId = Some(originId), clearDiagnostics = false)
+    val allCompilationTasks = projects.map(project =>
+      state.compileTask(project, originId = Some(originId), clearDiagnostics = false)
     )
 
     val duration = new FiniteDuration(20, TimeUnit.SECONDS)

@@ -12,9 +12,8 @@ import bloop.engine.ClientPool
 import bloop.engine.State
 import bloop.io.AbsolutePath
 import bloop.logging.Logger
+import bloop.task.Task
 import bloop.util.Environment
-
-import monix.eval.Task
 
 /** Cache that holds the state associated to each loaded build. */
 final class StateCache(cache: ConcurrentHashMap[AbsolutePath, StateCache.CachedState]) {
@@ -41,6 +40,7 @@ final class StateCache(cache: ConcurrentHashMap[AbsolutePath, StateCache.CachedS
         cachedState.build,
         cachedState.results,
         cachedState.compilerCache,
+        cachedState.sourceGeneratorCache,
         client,
         pool,
         commonOptions,
@@ -149,12 +149,18 @@ object StateCache {
   private[StateCache] case class CachedState(
       build: Build,
       results: ResultsCache,
-      compilerCache: bloop.CompilerCache
+      compilerCache: bloop.CompilerCache,
+      sourceGeneratorCache: SourceGeneratorCache
   )
 
   private[StateCache] object CachedState {
     def fromState(state: State): CachedState = {
-      StateCache.CachedState(state.build, state.results, state.compilerCache)
+      StateCache.CachedState(
+        state.build,
+        state.results,
+        state.compilerCache,
+        state.sourceGeneratorCache
+      )
     }
   }
 

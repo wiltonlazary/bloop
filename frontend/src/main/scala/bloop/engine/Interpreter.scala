@@ -32,10 +32,9 @@ import bloop.logging.Logger
 import bloop.logging.NoopLogger
 import bloop.reporter.LogReporter
 import bloop.reporter.ReporterInputs
+import bloop.task.Task
 import bloop.testing.LoggingEventHandler
 import bloop.testing.TestInternals
-
-import monix.eval.Task
 
 object Interpreter {
   // This is stack-safe because of Monix's trampolined execution
@@ -118,8 +117,13 @@ object Interpreter {
   private[bloop] def watch(projects: List[Project], state: State)(
       f: State => Task[State]
   ): Task[State] = {
-    val reachable = Dag.dfs(getProjectsDag(projects, state))
-    val projectsSourcesAndDirs = reachable.map(_.allSourceFilesAndDirectories)
+    val reachable = Dag.dfs(getProjectsDag(projects, state), mode = Dag.PreOrder)
+    val projectsSourcesAndDirs = reachable.map { project =>
+      for {
+        unmanaged <- project.allUnmanagedSourceFilesAndDirectories
+        generatorSourceDirs = project.sourceGenerators.flatMap(_.sourcesGlobs.map(_.directory))
+      } yield unmanaged ++ generatorSourceDirs
+    }
     val groupTasks =
       projectsSourcesAndDirs.grouped(8).map(group => Task.gatherUnordered(group)).toList
     Task
@@ -335,7 +339,10 @@ object Interpreter {
         if (!cmd.cascade) {
           val projectsToTest = {
             if (!cmd.includeDependencies) userSelectedProjects
-            else userSelectedProjects.flatMap(p => Dag.dfs(state.build.getDagFor(p)))
+            else
+              userSelectedProjects.flatMap(p =>
+                Dag.dfs(state.build.getDagFor(p), mode = Dag.PreOrder)
+              )
           }
 
           (userSelectedProjects, projectsToTest)
@@ -358,16 +365,18 @@ object Interpreter {
 
           val handler = new LoggingEventHandler(state.logger)
 
-          Tasks.test(
-            state,
-            projectsToTest,
-            cmd.args,
-            testFilter,
-            ScalaTestSuites.empty,
-            handler,
-            cmd.parallel,
-            RunMode.Normal
-          )
+          Tasks
+            .test(
+              state,
+              projectsToTest,
+              cmd.args,
+              testFilter,
+              ScalaTestSuites.empty,
+              handler,
+              cmd.parallel,
+              RunMode.Normal
+            )
+            .map(testRuns => state.mergeStatus(testRuns.status))
         }
       }
 
