@@ -21,6 +21,7 @@ import bloop.logging.RecordingLogger
 import bloop.task.Task
 import bloop.util.TestProject
 import bloop.util.TestUtil
+import bloop.internal.build.BuildTestInfo
 
 object LocalBspMetalsClientSpec extends BspMetalsClientSpec(BspProtocol.Local)
 object TcpBspMetalsClientSpec extends BspMetalsClientSpec(BspProtocol.Tcp)
@@ -29,13 +30,10 @@ class BspMetalsClientSpec(
     override val protocol: BspProtocol
 ) extends BspBaseSuite {
   private val testedScalaVersion = BuildInfo.scalaVersion
-  require(
-    testedScalaVersion == "2.12.17",
-    "Updating scala version requires updating semanticDB plugin"
-  )
-  private val semanticdbVersion = "4.6.0"
+  private val semanticdbVersion = BuildTestInfo.semanticdbVersion
   private val javaSemanticdbVersion = "0.5.7"
-  private val semanticdbJar = "semanticdb-scalac_2.12.17-4.6.0.jar"
+
+  private val semanticdbJar = s"semanticdb-scalac_$testedScalaVersion-$semanticdbVersion.jar"
 
   private val expectedConfig =
     s"""|{
@@ -89,35 +87,9 @@ class BspMetalsClientSpec(
     }
   }
 
-  test("do not initialize metals client and save settings with unsupported scala version") {
-    TestUtil.withinWorkspace { workspace =>
-      val `A` = TestProject(workspace, "A", Nil, scalaVersion = Some("2.12.4"))
-      val projects = List(`A`)
-      val configDir = TestProject.populateWorkspace(workspace, projects)
-      val logger = new RecordingLogger(ansiCodesSupported = false)
-      val extraParams = BloopExtraBuildParams(
-        ownsBuildFiles = None,
-        clientClassesRootDir = None,
-        semanticdbVersion = Some(semanticdbVersion), // Doesn't support 2.12.4
-        supportedScalaVersions = Some(List(testedScalaVersion)),
-        javaSemanticdbVersion = Some(javaSemanticdbVersion)
-      )
-
-      loadBspState(workspace, projects, logger, "Metals", bloopExtraParams = extraParams) { state =>
-        assertNoDiffInSettingsFile(
-          configDir,
-          expectedConfig
-        )
-        // Expect only range positions to be added, semanticdb is not supported
-        assertScalacOptions(state, `A`, "-Yrangepos")
-        assertNoDiff(logger.warnings.mkString(lineSeparator), "")
-      }
-    }
-  }
-
   test("initialize metals client in workspace with already enabled semanticdb") {
     TestUtil.withinWorkspace { workspace =>
-      val pluginPath = s"-Xplugin:path-to-plugin/semanticdb-scalac_2.12.17-4.6.0.jar"
+      val pluginPath = s"-Xplugin:path-to-plugin/$semanticdbJar"
       val defaultScalacOptions = List(
         "-P:semanticdb:failures:warning",
         s"-P:semanticdb:sourceroot:$workspace",
@@ -167,7 +139,7 @@ class BspMetalsClientSpec(
         "-P:semanticdb:failures:warning",
         "-P:semanticdb:synthetics:on",
         "-Xplugin-require:semanticdb",
-        s"-Xplugin:path-to-plugin/semanticdb-scalac_2.12.17-4.6.0.jar",
+        s"-Xplugin:path-to-plugin/$semanticdbJar",
         "-Yrangepos"
       )
       val `A` = TestProject(
@@ -195,7 +167,14 @@ class BspMetalsClientSpec(
         )
 
         val scalacOptions = state.scalaOptions(`A`)._2.items.head.options
-        assert(scalacOptions == correctSourceRootOption :: defaultScalacOptions.drop(1))
+        val expectedScalacOptions = correctSourceRootOption :: List(
+          "-Xplugin:path-to-plugin/semanticdb-scalac_2.12.18-4.7.8.jar",
+          "-Yrangepos",
+          "-P:semanticdb:failures:warning",
+          "-P:semanticdb:synthetics:on",
+          "-Xplugin-require:semanticdb"
+        )
+        assert(scalacOptions == expectedScalacOptions)
       }
     }
   }
@@ -317,6 +296,40 @@ class BspMetalsClientSpec(
 
       val `A` =
         TestProject(workspace, "A", dummyFooScalaAndBarJavaSources, javacOptions = JavacOptions.A)
+      val projects = List(`A`)
+      val configDir = TestProject.populateWorkspace(workspace, projects)
+      val logger = new RecordingLogger(ansiCodesSupported = false)
+      WorkspaceSettings.writeToFile(
+        configDir,
+        WorkspaceSettings
+          .fromSemanticdbSettings("0.5.7", semanticdbVersion, List(testedScalaVersion)),
+        logger
+      )
+      loadBspState(workspace, projects, logger) { state =>
+        val compiledState = state.compile(`A`).toTestState
+        assert(compiledState.status == ExitStatus.Ok)
+        assertSemanticdbFileFor("Foo.scala", compiledState)
+        assertSemanticdbFileFor("Bar.java", compiledState)
+      }
+    }
+  }
+
+  test("compile with old semanticDB") {
+    TestUtil.withinWorkspace { workspace =>
+      object JavacOptions {
+        // This will cause to use the forked javac compiler, since addong any `-J` property causes it
+        val A = List("-J-Xms48m")
+      }
+
+      val `A` =
+        TestProject(
+          workspace,
+          "A",
+          dummyFooScalaAndBarJavaSources,
+          javacOptions = JavacOptions.A,
+          // this Scala version is not supported in the newest semanticdb
+          scalaVersion = Some("2.12.8")
+        )
       val projects = List(`A`)
       val configDir = TestProject.populateWorkspace(workspace, projects)
       val logger = new RecordingLogger(ansiCodesSupported = false)
@@ -463,6 +476,94 @@ class BspMetalsClientSpec(
     }
   }
 
+  test("save-compile-semanticDB-many-options") {
+    TestUtil.withinWorkspace { workspace =>
+      val `A` = TestProject(
+        workspace,
+        "A",
+        dummyFooScalaAndBarJavaSources,
+        scalacOptions = List("-release", "8", "-Ybackend-parallelism", "8")
+      )
+      val projects = List(`A`)
+      TestProject.populateWorkspace(workspace, projects)
+      val logger = new RecordingLogger(ansiCodesSupported = false)
+      val extraParams = BloopExtraBuildParams(
+        ownsBuildFiles = None,
+        clientClassesRootDir = None,
+        semanticdbVersion = Some(semanticdbVersion),
+        supportedScalaVersions = Some(List(testedScalaVersion)),
+        javaSemanticdbVersion = Some(javaSemanticdbVersion)
+      )
+      loadBspState(workspace, projects, logger, "Metals", bloopExtraParams = extraParams) { state =>
+        val compiledState = state.compile(`A`).toTestState
+        assert(compiledState.status == ExitStatus.Ok)
+        assertSemanticdbFileFor("Foo.scala", compiledState)
+        assertSemanticdbFileFor("Bar.java", compiledState)
+      }
+    }
+  }
+
+  test("compile is successful with semanticDB and javac processorpath") {
+    TestUtil.withinWorkspace { workspace =>
+      val logger = new RecordingLogger(ansiCodesSupported = false)
+
+      val projectName = "scala-java-processorpath"
+      val localScalaVersion = "2.12.18"
+      val localSemanticdbJar = s"semanticdb-scalac_$localScalaVersion-$semanticdbVersion.jar"
+
+      val extraParams = BloopExtraBuildParams(
+        ownsBuildFiles = None,
+        clientClassesRootDir = None,
+        semanticdbVersion = Some(semanticdbVersion),
+        supportedScalaVersions = Some(List(testedScalaVersion)),
+        javaSemanticdbVersion = Some(javaSemanticdbVersion)
+      )
+
+      loadBspBuildFromResources(projectName, workspace, logger, "Metals", extraParams) { build =>
+        val project = build.projectFor(projectName)
+        val state = build.state
+
+        assertNoDiff(logger.warnings.mkString(lineSeparator), "")
+        assertNoDiffInSettingsFile(
+          build.rawState.build.origin,
+          expectedConfig
+        )
+        val projectPath = project.baseDir
+        assertScalacOptions(
+          state,
+          project,
+          s"""-Xplugin-require:semanticdb
+             |-P:semanticdb:failures:warning
+             |-P:semanticdb:sourceroot:$projectPath
+             |-P:semanticdb:synthetics:on
+             |-Xplugin:$localSemanticdbJar
+             |-Yrangepos
+             |""".stripMargin
+        )
+        val javacOptions = state.javacOptions(project)._2.items.flatMap(_.options)
+        val javaSemanticDBJar = "semanticdb-javac-0.5.7.jar"
+        assert(
+          javacOptions(javacOptions.indexOf("-processorpath") + 1).contains(javaSemanticDBJar)
+        )
+
+        val compiledState = build.state.compile(project)
+        assert(compiledState.status == ExitStatus.Ok)
+
+        assertSemanticdbFileForProject(
+          "/main/scala/example/Main.scala",
+          compiledState.toTestState,
+          projectName
+        )
+        assertSemanticdbFileForProject(
+          "/main/java/example/FoobarValueAnalyzer.java",
+          compiledState.toTestState,
+          projectName
+        )
+      }
+
+    }
+  }
+
   private val dummyFooScalaSources = List(
     """/Foo.scala
       |class Foo
@@ -476,6 +577,25 @@ class BspMetalsClientSpec(
   )
 
   private val dummyFooScalaAndBarJavaSources = dummyFooScalaSources ++ dummyBarJavaSources
+
+  private def assertSemanticdbFileForProject(
+      sourceFileName: String,
+      state: TestState,
+      projectName: String
+  ): Unit = {
+    val file = semanticdbFileProject(sourceFileName, state, projectName)
+    assertIsFile(file)
+  }
+
+  private def semanticdbFileProject(
+      sourceFileName: String,
+      state: TestState,
+      projectName: String
+  ) = {
+    val project = state.build.getProjectFor(projectName).get
+    val classesDir = state.client.getUniqueClassesDirFor(project, forceGeneration = true)
+    classesDir.resolve(s"META-INF/semanticdb/src/$sourceFileName.semanticdb")
+  }
 
   private def semanticdbFile(sourceFileName: String, state: TestState) = {
     val projectA = state.build.getProjectFor("A").get

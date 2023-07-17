@@ -5,8 +5,6 @@ import build.Dependencies.{Scala211Version, Scala212Version, SbtVersion}
 
 ThisBuild / dynverSeparator := "-"
 
-ThisBuild / scalafixDependencies += "com.github.liancheng" %% "organize-imports" % "0.6.0"
-
 // Add hook for scalafmt validation
 Global / onLoad ~= { old =>
   if (!scala.util.Properties.isWin) {
@@ -28,8 +26,7 @@ Global / onLoad ~= { old =>
 
 val scalafixSettings: Seq[Setting[_]] = Seq(
   scalacOptions ++= {
-    if (scalaVersion.value.startsWith("2.11")) Seq("-Ywarn-unused-import")
-    else if (scalaVersion.value.startsWith("2.12")) Seq("-Ywarn-unused", "-Xlint:unused")
+    if (scalaVersion.value.startsWith("2.12")) Seq("-Ywarn-unused", "-Xlint:unused")
     else if (scalaVersion.value.startsWith("2.13")) Seq("-Wunused")
     else Seq.empty
   },
@@ -144,7 +141,6 @@ lazy val frontend: Project = project
       build.BuildKeys.bloopName,
       Keys.version,
       Keys.scalaVersion,
-      nailgunClientLocation,
       "zincVersion" -> Dependencies.zincVersion,
       "bspVersion" -> Dependencies.bspVersion,
       "nativeBridge04" -> (nativeBridge04Name + "_" + Keys.scalaBinaryVersion.value),
@@ -166,6 +162,8 @@ lazy val frontend: Project = project
       Dependencies.scalaDebugAdapter,
       Dependencies.bloopConfig
     ),
+    // needed for tests and to be automatically updated
+    Test / libraryDependencies += Dependencies.semanticdb intransitive (),
     dependencyOverrides += Dependencies.shapeless,
     scalafixSettings,
     testSettings,
@@ -369,6 +367,7 @@ lazy val buildpress = project
   .dependsOn(bloopgun, bloopShared, buildpressConfig)
   .settings(
     scalaVersion := Scala212Version,
+    scalafixSettings,
     (run / fork) := true,
     libraryDependencies ++= List(
       Dependencies.caseApp

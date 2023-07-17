@@ -1,6 +1,6 @@
-addSbtPlugin("org.portable-scala" % "sbt-scalajs-crossproject" % "1.2.0")
-addSbtPlugin("org.scala-js" % "sbt-scalajs" % "1.13.0")
-addSbtPlugin("com.dwijnand" % "sbt-dynver" % "4.1.1")
+addSbtPlugin("org.portable-scala" % "sbt-scalajs-crossproject" % "1.3.2")
+addSbtPlugin("org.scala-js" % "sbt-scalajs" % "1.13.2")
+addSbtPlugin("com.github.sbt" % "sbt-dynver" % "5.0.1")
 addSbtPlugin("ohnosequences" % "sbt-github-release" % "0.7.0")
 addSbtPlugin("com.scalawilliam.esbeetee" % "sbt-vspp" % "0.4.11")
 addSbtPlugin("org.scalameta" % "sbt-scalafmt" % "2.5.0")
@@ -9,17 +9,19 @@ addSbtPlugin("com.eed3si9n" % "sbt-buildinfo" % "0.11.0")
 // needs to be updated in order for us to bump to 0.4.x.
 addSbtPlugin("pl.project13.scala" % "sbt-jmh" % "0.3.7")
 addSbtPlugin("com.github.sbt" % "sbt-git" % "2.0.1")
-addSbtPlugin("com.github.sbt" % "sbt-ci-release" % "1.5.11")
+addSbtPlugin("com.github.sbt" % "sbt-ci-release" % "1.5.12")
 addSbtPlugin("org.scalameta" % "sbt-mdoc" % "2.3.7")
 addSbtPlugin("org.scala-debugger" % "sbt-jdi-tools" % "1.1.1")
-addSbtPlugin("com.github.sbt" % "sbt-native-packager" % "1.9.15")
-addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.10.4")
+addSbtPlugin("com.github.sbt" % "sbt-native-packager" % "1.9.16")
+addSbtPlugin("ch.epfl.scala" % "sbt-scalafix" % "0.11.0")
 
 updateOptions := updateOptions.value.withLatestSnapshots(false)
 libraryDependencies ++= List(
-  "org.eclipse.jgit" % "org.eclipse.jgit" % "6.4.0.202211300538-r",
-  "org.eclipse.jgit" % "org.eclipse.jgit.ssh.jsch" % "6.4.0.202211300538-r",
-  "commons-codec" % "commons-codec" % "1.15",
+  // set to jgit 5, because 6 is compatible only with java 11,
+  // context https://github.com/scalacenter/bloop/pull/2101
+  "org.eclipse.jgit" % "org.eclipse.jgit" % "5.13.2.202306221912-r",
+  "org.eclipse.jgit" % "org.eclipse.jgit.ssh.jsch" % "5.13.2.202306221912-r",
+  "commons-codec" % "commons-codec" % "1.16.0",
   ("ch.epfl.scala" % "jarjar" % "1.7.2-patched")
     .exclude("org.apache.ant", "ant")
 )

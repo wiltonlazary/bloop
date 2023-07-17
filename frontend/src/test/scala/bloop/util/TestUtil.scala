@@ -1,6 +1,7 @@
 package bloop.util
 
 import java.io.File
+import java.lang.management.ManagementFactory
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.attribute.FileTime
@@ -53,7 +54,6 @@ import _root_.monix.execution.Scheduler
 import org.junit.Assert
 import sbt.internal.inc.BloopComponentCompiler
 import xsbti.ComponentProvider
-import java.lang.management.ManagementFactory
 
 object TestUtil {
   def projectDir(base: Path, name: String): Path = base.resolve(name)
@@ -263,9 +263,7 @@ object TestUtil {
   }
 
   private[bloop] def runAndTestProperties = {
-    val props = new bloop.cli.CommonOptions.PrettyProperties()
-    props.put("BLOOP_OWNER", "owner")
-    props
+    new bloop.cli.CommonOptions.PrettyProperties(Map("BLOOP_OWNER" -> "owner"))
   }
 
   /**
